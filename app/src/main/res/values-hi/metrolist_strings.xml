@@ -53,4 +53,6 @@
     <string name="sync_playlist_desc">इस प्लेलिस्ट को YouTube Music के साथ सिंक करें</string>
     <string name="copy_link">लिंक की प्रतिलिपि करें</string>
     <string name="select">सबका चयन करें</string>
+    <string name="other">अन्य</string>
+    <string name="remote_history">दूरस्थ</string>
 </resources>
