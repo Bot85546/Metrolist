@@ -51,7 +51,7 @@
     <string name="slim_navbar">شريط تنقل سفلي رفيع</string>
     <string name="auto_playlists">قوائم التشغيل التلقائيه</string>
     <string name="show_liked_playlist">إظهار قائمة \"الاعجابات\"</string>
-    <string name="show_downloaded_playlist">إظهار قائمة \"التحميلات\"</string>
+    <string name="show_downloaded_playlist">إظهار قائمة \"التنزيلات\"</string>
     <string name="show_top_playlist">إظهار قائمة \"الأكثر استماعاً\"</string>
     <string name="show_cached_playlist">إظهار قائمة \"الأغاني المخزنة مؤقتًا\"</string>
     <string name="generating_image">جارٍ إنشاء الصورة…</string>
@@ -756,4 +756,11 @@
     <string name="mini_player_background_style">نمط خلفية المشغل المصغر</string>
     <string name="transparent">شفاف</string>
     <string name="mini_player_background_not_available">غير متاح عند تعطيل تصميم المشغل المصغر الجديد</string>
+    <string name="enable_zemer">تفعيل زيمر</string>
+    <string name="enable_zemer_desc">الحان للموسيقى اليهودية</string>
+    <string name="add_to_playlist_position">اضف الى موضع قائمة التشغيل</string>
+    <string name="playlist_position_beginning">بداية قائمة التشغيل</string>
+    <string name="playlist_position_beginning_desc">اظهر الأغاني المضافة حديثًا قبل الأغاني الموجودة مسبقًا</string>
+    <string name="playlist_position_end">نهاية قائمة التشغيل</string>
+    <string name="playlist_position_end_desc">الأغاني المضافة حديثًا تظهر بعد الأغاني الموجودة مسبقًا</string>
 </resources>
