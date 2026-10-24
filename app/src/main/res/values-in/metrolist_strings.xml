@@ -7,7 +7,7 @@
     <string name="remote_history">Online</string>
     <string name="years">Tahun</string>
     <string name="months">Bulan</string>
-    <string name="please_wait">Mohon tunggu</string>
+    <string name="please_wait">Silahkan tunggu</string>
     <string name="generating_image">Membuat gambar…</string>
     <string name="charts">Grafik</string>
     <string name="back_button_desc">Kembali</string>
@@ -101,7 +101,7 @@
     <string name="sensitivity_percentage">%1$d%%</string>
     <string name="clear_song_cache_dialog">Apakah Anda yakin ingin menghapus semua lagu yang tersimpan di cache?</string>
     <string name="clear_image_cache_dialog">Apakah Anda yakin ingin menghapus semua gambar yang tersimpan?</string>
-    <string name="disable">Nonaktifkan</string>
+    <string name="disable">Matikan</string>
     <string name="top_length">Panjang daftar Teratas Saya</string>
     <string name="subscribe">Subscribe</string>
     <string name="subscribed">Disubscribe</string>
@@ -135,7 +135,7 @@
     <string name="romanize_current_track">Romanisasi lirik lagu saat ini</string>
     <string name="settings_section_ui">Antarmuka</string>
     <string name="settings_section_player_content">Pemutar &amp; Konten</string>
-    <string name="choose_from_library">Pilih dari galeri</string>
+    <string name="choose_from_library">Pilih dari pustaka</string>
     <string name="audio_offload">Aktifkan audio offload</string>
     <string name="audio_offload_description">Menggunakan jalur audio offload perangkat keras untuk pemutaran. Menonaktifkan ini dapat meningkatkan penggunaan baterai, tetapi dapat membantu jika Anda mengalami masalah dengan pemutaran atau pemrosesan audio</string>
     <string name="remove_custom_image">Hapus gambar kustom</string>
@@ -149,8 +149,8 @@
     <string name="update_available_title">Pembaruan baru tersedia</string>
     <string name="integrations">Integrasi</string>
     <string name="lastfm_integration">Integrasi Last.fm</string>
-    <string name="username">Username</string>
-    <string name="password">Password</string>
+    <string name="username">Nama pengguna</string>
+    <string name="password">Kata sandi</string>
     <string name="enable_scrobbling">Aktifkan scrobbling</string>
     <string name="lastfm_now_playing">Kirim status Now Playing</string>
     <string name="scrobbling_configuration">Konfigurasi scrobbling</string>
@@ -250,7 +250,7 @@
     <string name="equalizer_header">Ekualiser</string>
     <string name="no_profiles">Tidak ada profil ekualiser</string>
     <string name="import_profile">Impor profil</string>
-    <string name="eq_disabled">Dinonaktifkan</string>
+    <string name="eq_disabled">Dimatikan</string>
     <plurals name="band_count">
         <item quantity="other">%d pita frekuensi</item>
     </plurals>
@@ -345,8 +345,8 @@
     <string name="pending_requests">Menunggu permintaan</string>
     <string name="pending_suggestions">Menunggu saran</string>
     <string name="suggest_to_host">Sarankan ke host</string>
-    <string name="kick_user">Keluarkan</string>
-    <string name="mute">Bisu</string>
+    <string name="kick_user">Usir</string>
+    <string name="mute">Bisukan</string>
     <string name="unmute">Bunyikan</string>
     <string name="host_label">Host</string>
     <string name="you_label">Anda</string>
@@ -402,7 +402,7 @@
     <string name="enter_room_code">Masukkan kode ruangan</string>
     <string name="listen_together_settings_desc">Konfigurasikan server, nama pengguna, dan lainnya</string>
     <string name="copy_code">Salin kode</string>
-    <string name="kick_user_desc">Keluarkan orang ini dari sesi</string>
+    <string name="kick_user_desc">Hapus orang ini dari sesi</string>
     <string name="permanently_kick_user">Blokir secara permanen</string>
     <string name="permanently_kick_user_desc">Blokir permintaan bergabung orang ini dan sembunyikan saran mereka</string>
     <string name="transfer_ownership">Alihkan kepemilikan</string>
@@ -499,7 +499,7 @@
     <string name="discord_activity_name">Nama aktivitas</string>
     <string name="discord_advanced_mode">Mode lanjutan</string>
     <string name="discord_advanced_mode_description">Tampilkan opsi kustomisasi Rich Presence tambahan</string>
-    <string name="enable">Aktifkan</string>
+    <string name="enable">Hidupkan</string>
     <string name="prevent_duplicate_tracks_in_queue">Cegah lagu yang sama di antrean</string>
     <string name="prevent_duplicate_tracks_in_queue_desc">Saat menambahkan lagu yang sudah ada di antrean, lagu tersebut akan dipindahkan dari posisi sebelumnya daripada ditambahkan lagi</string>
     <string name="resume_on_bluetooth_connect">Lanjutkan saat koneksi Bluetooth tersambung</string>
@@ -693,7 +693,7 @@
     <string name="time_transfer_convert">Ubah</string>
     <string name="song_dropdown_more_results">Terus mengetik untuk mempersempit hasil (%d lebih banyak)</string>
     <string name="alarm">Alarm</string>
-    <string name="alarm_enabled">Menyalakan alarm</string>
+    <string name="alarm_enabled">Hidupkan alarm</string>
     <string name="alarm_time">Waktu alarm</string>
     <string name="alarm_playlist">Daftar putar</string>
     <string name="alarm_select_playlist">Pilih daftar putar</string>
@@ -720,10 +720,10 @@
     <string name="alarm_exact_permission_desc">Berikan izin untuk alarm dengan waktu yang presisi, meningkatkan keandalan saat aplikasi berjalan di latar belakang</string>
     <string name="alarm_battery_optimization_title">Hemat daya</string>
     <string name="alarm_battery_optimization_desc">Matikan hemat daya agar alarm bisa terus berjalan pada layar belakang</string>
-    <string name="change">Ubah</string>
+    <string name="change">Ganti</string>
     <string name="ai_system_prompt">Prompt sistem</string>
     <string name="ai_system_prompt_default">Bawaan</string>
-    <string name="ai_system_prompt_reset">Mengatur ulang</string>
+    <string name="ai_system_prompt_reset">Atur ulang ke bawaan</string>
     <string name="recognition_notification_channel_name">Pengenalan musik</string>
     <string name="lyrics_from_provider">Lirik dari %s</string>
     <string name="hide_status_bar_fullscreen_desc">Sembunyikan bilah status saat mode layar penuh lirik aktif</string>
@@ -782,8 +782,8 @@
     <string name="mixes">Mix</string>
     <string name="show_most_stats_playlists">Tampilkan daftar putar Terpopuler Mingguan dan Bulanan</string>
     <string name="show_most_stats_playlists_desc">Buat dan tampilkan daftar putar berdasarkan statistik Paling Sering Diputar di bagian Statistik dan Pustaka</string>
-    <string name="pin">Pin</string>
-    <string name="unpin">Lepas pin</string>
+    <string name="pin">Sematkan</string>
+    <string name="unpin">Lepas sematan</string>
     <string name="widget_playlists">Daftar putar</string>
     <string name="widget_playlists_description">Pintasan daftar putar dengan kontrol pemutar mini</string>
     <string name="choose_something_below">Pilih salah satu di bawah ini</string>
@@ -840,7 +840,7 @@
     <string name="android_auto_search_options">Opsi Pencarian</string>
     <string name="android_auto_search_local_songs_limit">Batas Pencarian Musik</string>
     <string name="android_auto_search_local_songs_limit_desc">Batasi jumlah lagu lokal yang ditampilkan dalam hasil pencarian. Disarankan untuk tidak mengaturnya menjadi tanpa batas agar aplikasi tidak mengalami crash karena kehabisan memori.</string>
-    <string name="playlist_unavailable">Playlist tidak tersedia</string>
+    <string name="playlist_unavailable">Daftar putar tidak tersedia</string>
     <string name="login_failed_with_error">Gagal masuk: %1$s</string>
     <string name="authentication_data_extraction_failed">Tidak dapat membaca sesi Youtube Music. Silakan coba lagi.</string>
     <string name="switch_youtube_channel">Ganti Youtube channel</string>
