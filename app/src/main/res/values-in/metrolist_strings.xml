@@ -7,9 +7,9 @@
     <string name="remote_history">Online</string>
     <string name="years">Tahun</string>
     <string name="months">Bulan</string>
-    <string name="please_wait">Silahkan tunggu</string>
+    <string name="please_wait">Silakan tunggu</string>
     <string name="generating_image">Membuat gambar…</string>
-    <string name="charts">Grafik</string>
+    <string name="charts">Tangga Lagu</string>
     <string name="back_button_desc">Kembali</string>
     <string name="album_cover_desc">Sampul album</string>
     <string name="top_music_videos">Video musik teratas</string>
@@ -839,7 +839,7 @@
     <string name="kmp_upgrade_action">Coba KMP</string>
     <string name="android_auto_search_options">Opsi Pencarian</string>
     <string name="android_auto_search_local_songs_limit">Batas Pencarian Musik</string>
-    <string name="android_auto_search_local_songs_limit_desc">Batasi jumlah lagu lokal yang ditampilkan di hasil pencarian. Disarankan untuk tidak mengatur ke tanpa batas untuk mencegah kerusakan memori</string>
+    <string name="android_auto_search_local_songs_limit_desc">Batasi jumlah lagu lokal yang ditampilkan di hasil pencarian. Disarankan untuk tidak mengaturnya menjadi tanpa batas agar aplikasi tidak mengalami crash karena kehabisan memori.</string>
     <string name="playlist_unavailable">Daftar putar tidak tersedia</string>
     <string name="login_failed_with_error">Gagal masuk: %1$s</string>
     <string name="authentication_data_extraction_failed">Tidak dapat membaca sesi Youtube Music. Silakan coba lagi.</string>

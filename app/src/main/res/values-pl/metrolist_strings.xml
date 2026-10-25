@@ -167,9 +167,9 @@
     <string name="auto_scroll">Ponowna synchronizacja</string>
     <string name="update_channel_name">Aktualizacje aplikacji</string>
     <string name="google_cast">Google Cast</string>
-    <string name="google_cast_description">Przesyłaj audio do Chromecasta oraz innych urządzeń obsługujące funkcje cast.</string>
+    <string name="google_cast_description">Przesyłaj audio do Chromecasta oraz innych urządzeń obsługujących funkcje cast.</string>
     <string name="last_fm_send_likes">Zsynchronizuj polubienia i niepolubione</string>
-    <string name="last_fm_send_likes_description">Polub/przestan lubić utwory w Last.fm kiedy lubisz je lub nie lubisz w Metrolist</string>
+    <string name="last_fm_send_likes_description">Polub/przestań lubić utwory w Last.fm kiedy lubisz je lub nie lubisz w Metrolist</string>
     <string name="logging_in">Logowanie…</string>
     <string name="hide_video_songs">Ukryj utwory wideo</string>
     <string name="details_desc">Zobacz szczegóły o utworze</string>
@@ -289,7 +289,7 @@
     <string name="remember_shuffle_and_repeat_desc">Zapamiętaj tryb mieszania i powtarzania po ponownym uruchomieniu aplikacji</string>
     <string name="pause_music_when_media_is_muted">Wstrzymaj po wyciszeniu dźwięku</string>
     <string name="keep_screen_on_when_player_is_expanded">Nie wygaszaj ekranu w widoku odtwarzacza</string>
-    <string name="lyrics_offset">Przesunięcie tesktu w czasie</string>
+    <string name="lyrics_offset">Przesunięcie tekstu w czasie</string>
     <string name="error_title">Błąd</string>
     <string name="error_eq_apply_failed">Nie udało się zastosować profilu korektora: %1$s</string>
     <string name="error_playback_failed">Nie udało się odtworzyć utworu</string>
@@ -811,7 +811,7 @@
     <string name="kmp_upgrade_title">Wersja KMP %s Metrolist jest dostępna</string>
     <string name="varispeed">Włącz varispeed</string>
     <string name="audio_track_playback_params">Użyj sprzętowego przetwarzania dźwięku</string>
-    <string name="update_available_message">Metrolist%s jest gotowy do pobrania.</string>
+    <string name="update_available_message">Metrolist %s jest gotowy do pobrania.</string>
     <string name="kmp_upgrade_warning">Metrolist KMP jest nadal w fazie rozwoju. Możesz spotkać różne błędy lub niedokończone funkcje.</string>
     <string name="kmp_upgrade_action">Spróbuj KMP</string>
     <string name="lyrics_animation_style_title">Styl animacji słowo po słowie</string>

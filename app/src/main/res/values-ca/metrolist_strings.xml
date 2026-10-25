@@ -249,7 +249,7 @@
     <string name="playlist_add_local_to_synced_note">Nota: No es poden afegir cançons locals a llistes sincronitzades/remotes. Qualsevol altra combinació és acceptable</string>
     <string name="disable_load_more_when_repeat_all_desc">No carregar automàticament més cançons similars mentre està actiu el mode repetir tot</string>
     <string name="audio_offload_description">Utilitzar la direcció de descarrega (offload) per a la reproducció de àudio. Desactivar aquesta funció podria incrementar l\'ús d\'energia però podria ser beneficiós si està tenint problemes en la reproducció d\'àudio o en pos processat</string>
-    <string name="cache_size_warning_message">Has triat un límit de grandària de memòria cau inferior al que l\'aplicació està utilitzant actualment (%1$s). Si continuas, l\'aplicació eliminarà alguns %2$s emmagatzemats per ajustar-se al nou límit. Continuar de tota manera?</string>
+    <string name="cache_size_warning_message">Has triat un límit de grandària de memòria cau inferior al que l\'aplicació està utilitzant actualment (%1$s). Si continues, l\'aplicació eliminarà alguns %2$s emmagatzemats per ajustar-se al nou límit. Continuar de tota manera?</string>
     <string name="wavy">Ondulat</string>
     <string name="equalizer_header">Equalitzador</string>
     <string name="no_profiles">Sense perfils d\'equalitzador</string>
@@ -705,12 +705,12 @@
     <string name="stream_client">Client de transmissió</string>
     <string name="stream_sources">Fonts de transmissió</string>
     <string name="stream_source_order">Ordre de transmissió</string>
-    <string name="stream_source_web_clients">Clientes web</string>
-    <string name="stream_source_native_clients">Clientes natius</string>
-    <string name="stream_source_creator_clients">Clientes de creador</string>
+    <string name="stream_source_web_clients">Clients web</string>
+    <string name="stream_source_native_clients">Clients natius</string>
+    <string name="stream_source_creator_clients">Clients de creador</string>
     <string name="loudness_level">Nivell de sonoritat</string>
     <string name="loudness_level_aggressive">Agressiu (-7 dB)</string>
-    <string name="loudness_level_loud">Sollorós (-11 dB)</string>
+    <string name="loudness_level_loud">Fort (-11 dB)</string>
     <string name="loudness_level_balanced">Equilibrat (-14 dB)</string>
     <string name="loudness_level_quiet">Silenciós (-19 dB)</string>
     <string name="alarm">Alarma</string>

@@ -332,7 +332,7 @@
     <string name="varispeed_description">Tonu (pitch) səsləndirmə sürəti ilə əlaqələndirin; nəticədə maqnit lentindəki kimi sürətlənmə və yavaşıma effektləri əldə olunur</string>
     <string name="audio_track_playback_params">Aparat təminatı səviyyəsində audio emalından istifadə edin</string>
     <string name="audio_track_playback_params_description">Sürət və ya ton (pitch) dəyişiklikləri üçün proqram təminatı səviyyəsində emal əvəzinə Android-in AudioTrack funksiyasından istifadə edin. Bu, həddindən artıq yüksək və ya aşağı ton dəyərləri üçün daha etibarlıdır</string>
-    <string name="google_cast">google_cast</string>
+    <string name="google_cast">Google Cast</string>
     <string name="google_cast_description">Audionu Chromecast və digər Cast dəstəkli cihazlara ötürün</string>
     <string name="lyrics_romanize_as_main">Romanizasiya olunmuş sözləri əsas olaraq göstər</string>
     <string name="integrations">İnteqrasiyalar</string>
@@ -418,8 +418,8 @@
     <string name="eq_downloading">Endirilir…</string>
     <string name="import_from_file">Fayldan idxal et</string>
     <plurals name="band_count">
-        <item quantity="one">%d qrup</item>
-        <item quantity="other">%d qruplar</item>
+        <item quantity="one">%d tezlik zolağı</item>
+        <item quantity="other">%d tezlik zolağı</item>
     </plurals>
     <string name="delete_profile_desc">Profili sil</string>
     <string name="delete_profile_confirmation">%1$s-i silmək istədiyinizə əminsinizmi? Bu əməliyyatı geri qaytarmaq mümkün deyil</string>
@@ -758,8 +758,8 @@
     <string name="remove_episode_from_saved">Yaddaşdan sil</string>
     <string name="subscribe_to_podcast">Podkastı kitabxanaya saxla</string>
     <plurals name="n_episode">
-        <item quantity="one">%d-ci epizod</item>
-        <item quantity="other">%d-ci epizodlar</item>
+        <item quantity="one">%d epizod</item>
+        <item quantity="other">%d epizod</item>
     </plurals>
     <string name="filter_episodes">Epizodlar</string>
     <string name="filter_profiles">Profillər</string>
@@ -770,7 +770,7 @@
     <string name="no_downloaded_episodes">Yüklənmiş epizod yoxdur</string>
     <plurals name="n_channel">
         <item quantity="one">%d kanal</item>
-        <item quantity="other">%d kanallar</item>
+        <item quantity="other">%d kanal</item>
     </plurals>
     <string name="restore_confirm_title">Ehtiyat nüsxə bərpa edilsin?</string>
     <string name="restore_confirm_message">Bu, tətbiq məlumatlarınızı seçilmiş ehtiyat nüsxədən bərpa edəcək</string>
@@ -849,7 +849,7 @@
     <string name="stream_source_web_remix_desc">Əsas müştəri. Autentifikasiyadan keçib; əksər trekləri əhatə edir.</string>
     <string name="stream_source_tvhtml5">TVHTML5</string>
     <string name="stream_source_tvhtml5_desc">TV müştərisi. Etibarlı ehtiyat variant.</string>
-    <string name="stream_source_visionos">GörünənOS</string>
+    <string name="stream_source_visionos">visionOS</string>
     <string name="stream_source_visionos_desc">Apple Vision. Məhsuldarlığın məhdudlaşdırılması yoxdur; çox etibarlıdır.</string>
     <string name="stream_source_android_vr">Android VR</string>
     <string name="stream_source_android_vr_desc">Android VR müştəriləri (bütün versiyalar).</string>

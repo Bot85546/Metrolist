@@ -867,7 +867,7 @@
     <string name="error_no_internet_connection">Sin conexión a internet</string>
     <string name="error_offline_playback">No tienes conexión. Conéctate a internet o reproduce una canción descargada para uso sin conexión.</string>
     <string name="error_explicit_login_recommended">La reproducción explícita funciona mejor si inicias sesión.</string>
-    <string name="enable_zemer">Hablitar Zemer</string>
+    <string name="enable_zemer">Habilitar Zemer</string>
     <string name="force_bottom_navbar">Forzar la barra de navegación inferior</string>
     <string name="playlist_created_locally">Sincronización con Youtube fallida. La lista de reproducción se ha creado localmente.</string>
     <string name="update_available_message">Metrolist %s está listo para descargar.</string>
