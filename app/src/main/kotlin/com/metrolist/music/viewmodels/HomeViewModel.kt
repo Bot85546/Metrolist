@@ -82,7 +82,7 @@ internal fun buildSpeedDialItems(
     pinned: List<YTItem>,
     keepListening: List<YTItem>,
     quickPicks: List<YTItem>,
-    home: List<YTItem>,
+    home: Iterable<YTItem>,
 ): List<YTItem> {
     val seen = HashSet<String>(27)
     return buildList(27) {
@@ -190,7 +190,12 @@ class HomeViewModel @Inject constructor(
                             thumbnail = song.thumbnailUrl ?: "",
                         )
                     },
-                home = home?.sections.orEmpty().flatMap { it.items },
+                // Flatten Home sections lazily: Speed Dial stops at 27 unique items,
+                // so constructing the entire Home recommendations list is wasteful.
+                home = home?.sections.orEmpty()
+                    .asSequence()
+                    .flatMap { it.items.asSequence() }
+                    .asIterable(),
             )
         }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
