@@ -17,8 +17,14 @@ class NormalizationGainTest {
 
     @Test
     fun `gain is clamped to processor limits`() {
-        assertEquals(300, normalizationGainMb(-30.0, null, -14f))
+        assertEquals(600, normalizationGainMb(-30.0, null, -14f))
         assertEquals(-1500, normalizationGainMb(null, 10.0, -14f))
+    }
+
+    @Test
+    fun `quiet songs can gain more than three decibels`() {
+        assertEquals(400, normalizationGainMb(null, -18.0, -14f))
+        assertEquals(600, normalizationGainMb(null, -20.0, -14f))
     }
 
     @Test
