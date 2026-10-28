@@ -589,31 +589,33 @@ class HomeViewModel @Inject constructor(
     private val _isLoadingMore = MutableStateFlow(false)
     fun loadMoreYouTubeItems(continuation: String?) {
         if (continuation == null || _isLoadingMore.value) return
+        // Guard before dispatching: two quick scroll callbacks must not load
+        // the same continuation twice while the IO coroutine is being queued.
+        _isLoadingMore.value = true
 
         viewModelScope.launch(Dispatchers.IO) {
-            _isLoadingMore.value = true
-            // DataStore.get() is blocking. Reading these on the caller thread
-            // previously paused Home scrolling when loading more sections.
-            val hideExplicit = context.dataStore.get(HideExplicitKey, false)
-            val hideVideoSongs = context.dataStore.get(HideVideoSongsKey, false)
-            val hideYoutubeShorts = context.dataStore.get(HideYoutubeShortsKey, false)
-            val nextSections = YouTube.home(continuation).getOrNull() ?: run {
-                _isLoadingMore.value = false
-                return@launch
-            }
+            try {
+                // DataStore.get() is blocking and must not stall Home scrolling.
+                val hideExplicit = context.dataStore.get(HideExplicitKey, false)
+                val hideVideoSongs = context.dataStore.get(HideVideoSongsKey, false)
+                val hideYoutubeShorts = context.dataStore.get(HideYoutubeShortsKey, false)
+                val nextSections = YouTube.home(continuation).getOrNull() ?: return@launch
 
-            homePage.value = nextSections.copy(
-                chips = homePage.value?.chips,
-                sections = (homePage.value?.sections.orEmpty() + nextSections.sections).mapNotNull { section ->
-                    val filteredItems = section.items
-                        .filterOutNulls()
-                        .filterExplicit(hideExplicit)
-                        .filterVideoSongs(hideVideoSongs)
-                        .filterYoutubeShorts(hideYoutubeShorts)
-                    if (filteredItems.isEmpty()) null else section.copy(items = filteredItems)
-                }
-            )
-            _isLoadingMore.value = false
+                homePage.value = nextSections.copy(
+                    chips = homePage.value?.chips,
+                    sections = (homePage.value?.sections.orEmpty() + nextSections.sections).mapNotNull { section ->
+                        val filteredItems = section.items
+                            .filterOutNulls()
+                            .filterExplicit(hideExplicit)
+                            .filterVideoSongs(hideVideoSongs)
+                            .filterYoutubeShorts(hideYoutubeShorts)
+                        if (filteredItems.isEmpty()) null else section.copy(items = filteredItems)
+                    }
+                )
+            } finally {
+                // A failed or cancelled network request must not block future pages.
+                _isLoadingMore.value = false
+            }
         }
     }
 
