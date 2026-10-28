@@ -87,6 +87,18 @@ class App :
             Timber.e(e, "Failed to ensure DataStore directory")
         }
 
+        // Apply the customized Library defaults once, including after restoring
+        // a backup from the original MetroList. Subsequent user choices persist.
+        applicationScope.launch(Dispatchers.IO) {
+            safeDataStoreEdit { preferences ->
+                if (preferences[CustomLibraryDefaultsAppliedKey] != true) {
+                    preferences[ShowCachedPlaylistKey] = false
+                    preferences[ShowUploadedPlaylistKey] = false
+                    preferences[CustomLibraryDefaultsAppliedKey] = true
+                }
+            }
+        }
+
         // Plant logging before extraction services initialize.
         Timber.plant(Timber.DebugTree())
         InnerTubeXPlayer.initialize(this)
