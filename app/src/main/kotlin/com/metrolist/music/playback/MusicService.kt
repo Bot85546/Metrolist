@@ -13,7 +13,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -86,14 +85,11 @@ import androidx.media3.extractor.mp4.FragmentedMp4Extractor
 import androidx.media3.extractor.mp4.Mp4Extractor
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
-import androidx.media3.session.MediaController
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaNotification
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
-import androidx.media3.session.SessionToken
 import com.google.common.collect.ImmutableList
-import com.google.common.util.concurrent.MoreExecutors
 import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.WatchEndpoint
@@ -410,7 +406,6 @@ class MusicService :
     private val sessionArtworkLoader by lazy { CoilBitmapLoader(this, scope) }
     private var portableArtworkJob: Job? = null
     private var portableArtworkReplacementId: String? = null
-    private var controllerFuture: com.google.common.util.concurrent.ListenableFuture<MediaController>? = null
 
     private val playerInitialized = MutableStateFlow(false)
     val isPlayerReady: kotlinx.coroutines.flow.StateFlow<Boolean> = playerInitialized.asStateFlow()
@@ -614,14 +609,9 @@ class MusicService :
 
         playerInitialized.value = false
 
-        // Call startForeground() as early as possible to satisfy the
-        // 5-second timeout imposed by Context.startForegroundService().
-        // On some OEMs (e.g. MIUI), even a DataStore read can be slow
-        // enough to miss the window, so we promote before any I/O.
-        ensureForegroundChannelExists()
-        if (!ensureStartedAsForegroundOrStop()) {
-            return
-        }
+        // Bound-only service creation should not display an empty notification.
+        // Media3 promotes the session when playback begins; explicit alarm and
+        // media-button foreground starts are handled by onStartCommand().
 
         // Read ALL startup preferences in one shot so that subsequent code
         // never calls dataStore.get() (which does runBlocking internally).
@@ -719,19 +709,6 @@ class MusicService :
         if (startupPrefs!![RememberShuffleAndRepeatKey] ?: true) {
             player.shuffleModeEnabled = startupPrefs!![ShuffleModeKey] ?: false
         }
-
-        // Keep a connected controller so that notification works
-        val sessionToken = SessionToken(this, ComponentName(this, MusicService::class.java))
-        controllerFuture = MediaController.Builder(this, sessionToken).buildAsync()
-        controllerFuture?.addListener({
-            try {
-                controllerFuture?.get()
-            } catch (e: Exception) {
-                Timber.tag(TAG).e(e, "Failed to initialize MediaController")
-                controllerFuture = null
-                stopSelf()
-            }
-        }, MoreExecutors.directExecutor())
 
         connectivityManager = getSystemService()!!
         connectivityObserver = NetworkConnectivityObserver(this)
@@ -4230,13 +4207,6 @@ class MusicService :
      * [Context.startForegroundService] requires [startForeground] to succeed quickly. If we cannot
      * enter the foreground state, stop immediately so the system does not ANR the app process.
      */
-    private fun ensureStartedAsForegroundOrStop(): Boolean =
-        startForegroundSafely(
-            notification = createFallbackForegroundNotification(),
-            deniedMessage = "Foreground service start not allowed; stopping service to avoid ANR",
-            failureMessage = "Failed to enter foreground; stopping service to avoid ANR",
-        )
-
     private fun ensureForegroundWithLatestNotificationOrStop(): Boolean =
         startForegroundSafely(
             notification = latestMediaNotification ?: createFallbackForegroundNotification(),
@@ -4315,6 +4285,16 @@ class MusicService :
             false
         }
 
+    /**
+     * Distinguishes an active/starting session from an idle service when the
+     * Activity enters the background. Buffering must not stop playback.
+     */
+    fun hasActivePlaybackIntent(): Boolean {
+        if (!::player.isInitialized) return false
+        return (player.playWhenReady && player.playbackState != Player.STATE_ENDED) ||
+            castConnectionHandler?.isCasting?.value == true
+    }
+
     override fun onDestroy() {
         isRunning = false
 
@@ -4372,8 +4352,6 @@ class MusicService :
         player.removeListener(this)
         sleepTimer?.let { player.removeListener(it) }
         initialBufferRecoveryJob?.cancel()
-        controllerFuture?.let { MediaController.releaseFuture(it) }
-        controllerFuture = null
         releaseExoPlayer(player)
         scope.cancel()
         super.onDestroy()
@@ -4420,8 +4398,6 @@ class MusicService :
                 abandonAudioFocus()
             }
         }.onFailure { Timber.tag(TAG).e(it, "Failed to stop playback on task clear") }
-        controllerFuture?.let { MediaController.releaseFuture(it) }
-        controllerFuture = null
         latestMediaNotification = null
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID)
@@ -4468,15 +4444,13 @@ class MusicService :
             }
             taskCleared = false
         }
-        // On Android O+, every startForegroundService() call requires
-        // Service.startForeground() to be called within a short timeout.
-        // Some OEMs (e.g. MIUI) strictly enforce this even when the
-        // service is already in the foreground, so promote here unless Media3 is handling a
-        // notification dismissal. Re-promoting that intent immediately restores the dismissed
-        // media control.
-        val isNotificationDismissal =
-            intent?.getBooleanExtra(MediaNotification.NOTIFICATION_DISMISSED_EVENT_KEY, false) == true
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !isNotificationDismissal) {
+        // Alarm PendingIntents and headset media buttons may explicitly start a
+        // foreground service. Normal widget updates and media notification events
+        // must not create a placeholder foreground notification.
+        val requiresEarlyForeground =
+            intent?.action == ACTION_ALARM_TRIGGER ||
+                intent?.action == Intent.ACTION_MEDIA_BUTTON
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && requiresEarlyForeground) {
             if (!ensureForegroundWithLatestNotificationOrStop()) {
                 return START_NOT_STICKY
             }
