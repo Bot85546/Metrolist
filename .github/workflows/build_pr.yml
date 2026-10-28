@@ -79,8 +79,12 @@ jobs:
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
           LASTFM_SECRET: ${{ secrets.LASTFM_SECRET }}
 
+      - name: Prepare direct APK download
+        run: cp app/build/outputs/apk/gms/debug/*.apk Metrolitt.apk
+
       - name: Upload Metrolitt APK
         uses: actions/upload-artifact@v7
         with:
-          name: metrolitt-debug-apk
-          path: app/build/outputs/apk/gms/debug/*.apk
+          path: Metrolitt.apk
+          archive: false
+          if-no-files-found: error
