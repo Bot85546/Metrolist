@@ -336,6 +336,10 @@ class MainActivity : FragmentActivity() {
         if (!listenTogetherManager.isInRoom &&
             playerConnection?.service?.hasActivePlaybackIntent() != true
         ) {
+            // The service keeps an additional controller only while music is
+            // starting/playing. Release it before unbinding so idle teardown
+            // cannot be prevented by its own MediaController connection.
+            playerConnection?.service?.releaseIdlePlaybackNotificationController()
             safeUnbindService("onStop() without active playback")
             playerConnection = null
             playerConnectionSnapshot = null
