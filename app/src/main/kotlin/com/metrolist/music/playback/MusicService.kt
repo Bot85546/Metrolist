@@ -409,6 +409,7 @@ class MusicService :
     private var mediaSession: MediaLibrarySession? = null
     private val sessionArtworkLoader by lazy { CoilBitmapLoader(this, scope) }
     private var portableArtworkJob: Job? = null
+    private var portableArtworkReplacementId: String? = null
     private var controllerFuture: com.google.common.util.concurrent.ListenableFuture<MediaController>? = null
 
     private val playerInitialized = MutableStateFlow(false)
@@ -2556,6 +2557,7 @@ class MusicService :
                         .build(),
                 )
                 .build()
+            portableArtworkReplacementId = mediaId
             player.replaceMediaItem(player.currentMediaItemIndex, updated)
         }
     }
@@ -2564,6 +2566,16 @@ class MusicService :
         mediaItem: MediaItem?,
         reason: Int,
     ) {
+        // The metadata-only artwork refresh must not be treated as a new song.
+        if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED &&
+            mediaItem?.mediaId == portableArtworkReplacementId &&
+            mediaItem.mediaMetadata.artworkData != null
+        ) {
+            portableArtworkReplacementId = null
+            return
+        }
+        portableArtworkReplacementId = null
+
         // Only natural completion transitions mark the previous track as fully cached,
         // never a manual skip or seek. Read lastTransitionedMediaId before replacing it.
         if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
