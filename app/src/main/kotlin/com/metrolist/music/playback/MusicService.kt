@@ -5188,5 +5188,7 @@ internal fun normalizationGainMb(
     val measuredLufs = perceptualLoudnessDb ?: loudnessDb?.let { it + LoudnessLevel.AGGRESSIVE.targetLufs }
     return measuredLufs
         ?.let { (-(it - targetLufs) * 100.0).toInt() }
-        ?.coerceIn(-1500, 300)
+        // Allow up to +6 dB for quiet tracks; retain the -15 dB reduction
+        // limit. The PCM processor still clips peaks, so this is not a limiter.
+        ?.coerceIn(-1500, 600)
 }
