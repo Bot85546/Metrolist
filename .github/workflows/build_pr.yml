@@ -1,4 +1,4 @@
-name: Build PR
+name: Build Metrolitt APK
 
 on:
   pull_request:
@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   build:
+    name: Metrolitt Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -67,7 +68,7 @@ jobs:
           path: app/pr-debug.keystore
           key: ${{ steps.pr_keystore.outputs.cache-primary-key }}
 
-      - name: Build GMS Debug APK
+      - name: Compile Metrolitt APK
         run: ./gradlew --console=plain assembleGmsDebug --warning-mode summary
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
@@ -78,7 +79,7 @@ jobs:
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
           LASTFM_SECRET: ${{ secrets.LASTFM_SECRET }}
 
-      - name: Upload APK
+      - name: Upload Metrolitt APK
         uses: actions/upload-artifact@v7
         with:
           name: metrolitt-debug-apk
