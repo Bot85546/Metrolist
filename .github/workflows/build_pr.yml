@@ -71,8 +71,8 @@ jobs:
         run: ./gradlew --console=plain assembleGmsDebug --warning-mode summary
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
-          METROLIST_APPLICATION_ID: com.metrolist.music.pr.p${{ github.event.number }}
-          METROLIST_APP_NAME: Metrolist PR ${{ github.event.number }}
+          METROLIST_APPLICATION_ID: com.metrolist.music.custom
+          METROLIST_APP_NAME: Metrolist Custom
           METROLIST_DEBUG_KEYSTORE_PATH: pr-debug.keystore
           PULL_REQUEST: "true"
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
@@ -81,5 +81,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v7
         with:
-          name: app-universal-debug-pr-${{ github.event.number }}
+          name: metrolist-custom-debug-apk
           path: app/build/outputs/apk/gms/debug/*.apk
