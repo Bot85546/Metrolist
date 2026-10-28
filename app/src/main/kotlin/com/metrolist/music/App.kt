@@ -94,6 +94,7 @@ class App :
                 if (preferences[CustomLibraryDefaultsAppliedKey] != true) {
                     preferences[ShowCachedPlaylistKey] = false
                     preferences[ShowUploadedPlaylistKey] = false
+                    preferences[ChipSortTypeKey] = LibraryFilter.LIBRARY.name
                     preferences[CustomLibraryDefaultsAppliedKey] = true
                 }
             }
