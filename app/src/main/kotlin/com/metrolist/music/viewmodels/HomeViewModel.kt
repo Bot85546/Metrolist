@@ -83,10 +83,21 @@ internal fun buildSpeedDialItems(
     keepListening: List<YTItem>,
     quickPicks: List<YTItem>,
     home: List<YTItem>,
-): List<YTItem> =
-    (pinned + keepListening + quickPicks + home)
-        .distinctBy { it.id }
-        .take(27)
+): List<YTItem> {
+    val seen = HashSet<String>(27)
+    return buildList(27) {
+        // Preserve source priority and first occurrence while avoiding the
+        // intermediate concatenated lists and scanning past the 27-item limit.
+        for (source in listOf(pinned, keepListening, quickPicks, home)) {
+            for (item in source) {
+                if (seen.add(item.id)) {
+                    add(item)
+                    if (size == 27) return@buildList
+                }
+            }
+        }
+    }
+}
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
