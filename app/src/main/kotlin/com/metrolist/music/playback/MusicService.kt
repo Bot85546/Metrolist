@@ -2533,9 +2533,10 @@ class MusicService :
 
     private fun publishPortableArtwork(mediaItem: MediaItem?) {
         portableArtworkJob?.cancel()
-        val artworkUri = mediaItem?.mediaMetadata?.artworkUri ?: return
-        if (mediaItem.mediaMetadata.artworkData != null) return
-        val mediaId = mediaItem.mediaId
+        val item = mediaItem ?: return
+        val artworkUri = item.mediaMetadata.artworkUri ?: return
+        if (item.mediaMetadata.artworkData != null) return
+        val mediaId = item.mediaId
 
         portableArtworkJob = scope.launch {
             val artwork = sessionArtworkLoader.loadPortableArtwork(artworkUri)
@@ -2568,7 +2569,8 @@ class MusicService :
     ) {
         // The metadata-only artwork refresh must not be treated as a new song.
         if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED &&
-            mediaItem?.mediaId == portableArtworkReplacementId &&
+            mediaItem != null &&
+            mediaItem.mediaId == portableArtworkReplacementId &&
             mediaItem.mediaMetadata.artworkData != null
         ) {
             portableArtworkReplacementId = null
