@@ -403,26 +403,29 @@ interface DatabaseDao {
     @Query(
         """
         SELECT s.id, s.title, s.thumbnailUrl, s.isVideo,
-               (SELECT name FROM artist WHERE id = sam.artistId) as artistName,
-               (SELECT COUNT(1)
-                FROM event
-                WHERE songId = s.id
-                  AND timestamp > :fromTimeStamp AND timestamp <= :toTimeStamp) AS songCountListened,
-               (SELECT SUM(event.playTime)
-                FROM event
-                WHERE songId = s.id
-                  AND timestamp > :fromTimeStamp AND timestamp <= :toTimeStamp) AS timeListened
+               (SELECT name FROM artist WHERE id = sam.artistId) AS artistName,
+               top_songs.qualifiedPlays AS songCountListened,
+               (SELECT SUM(e2.playTime)
+                FROM event e2
+                WHERE e2.songId = s.id
+                  AND e2.timestamp > :fromTimeStamp AND e2.timestamp <= :toTimeStamp) AS timeListened
         FROM song s
         LEFT JOIN song_artist_map sam ON s.id = sam.songId
-        JOIN (SELECT songId
-              FROM event
-              WHERE timestamp > :fromTimeStamp
-                AND timestamp <= :toTimeStamp
-              GROUP BY songId
-              ORDER BY SUM(playTime) DESC
-              LIMIT :limit OFFSET :offset) AS top_songs ON s.id = top_songs.songId
+        JOIN (
+            SELECT e.songId, COUNT(*) AS qualifiedPlays, SUM(e.playTime) AS qualifiedPlayTime
+            FROM event e
+            JOIN song counted_song ON counted_song.id = e.songId
+            WHERE e.timestamp > :fromTimeStamp AND e.timestamp <= :toTimeStamp
+              AND (
+                  (counted_song.duration > 0 AND e.playTime > counted_song.duration * 700)
+                  OR (counted_song.duration <= 0 AND e.playTime >= 30000)
+              )
+            GROUP BY e.songId
+            ORDER BY qualifiedPlays DESC, qualifiedPlayTime DESC, e.songId ASC
+            LIMIT :limit OFFSET :offset
+        ) AS top_songs ON s.id = top_songs.songId
         GROUP BY s.id
-        ORDER BY timeListened DESC
+        ORDER BY top_songs.qualifiedPlays DESC, top_songs.qualifiedPlayTime DESC, s.id ASC
         """,
     )
     fun mostPlayedSongsStats(
@@ -496,25 +499,23 @@ interface DatabaseDao {
     @RewriteQueriesToDropUnusedColumns
     @Query(
         """
-        SELECT song.*,
-               (SELECT COUNT(1)
-                FROM event
-                WHERE songId = song.id
-                  AND timestamp > :fromTimeStamp AND timestamp <= :toTimeStamp) AS songCountListened,
-               (SELECT SUM(event.playTime)
-                FROM event
-                WHERE songId = song.id
-                  AND timestamp > :fromTimeStamp AND timestamp <= :toTimeStamp) AS timeListened
+        SELECT song.*
         FROM song
-        JOIN (SELECT songId
-                     FROM event
-                     WHERE timestamp > :fromTimeStamp
-                     AND timestamp <= :toTimeStamp
-                     GROUP BY songId
-                     ORDER BY SUM(playTime) DESC
-                     LIMIT :limit OFFSET :offset)
-        ON song.id = songId
-    """,
+        JOIN (
+            SELECT e.songId, COUNT(*) AS qualifiedPlays, SUM(e.playTime) AS qualifiedPlayTime
+            FROM event e
+            JOIN song counted_song ON counted_song.id = e.songId
+            WHERE e.timestamp > :fromTimeStamp AND e.timestamp <= :toTimeStamp
+              AND (
+                  (counted_song.duration > 0 AND e.playTime > counted_song.duration * 700)
+                  OR (counted_song.duration <= 0 AND e.playTime >= 30000)
+              )
+            GROUP BY e.songId
+            ORDER BY qualifiedPlays DESC, qualifiedPlayTime DESC, e.songId ASC
+            LIMIT :limit OFFSET :offset
+        ) AS top_songs ON song.id = top_songs.songId
+        ORDER BY top_songs.qualifiedPlays DESC, top_songs.qualifiedPlayTime DESC, song.id ASC
+        """,
     )
     fun mostPlayedSongs(
         fromTimeStamp: LocalDateTime,
