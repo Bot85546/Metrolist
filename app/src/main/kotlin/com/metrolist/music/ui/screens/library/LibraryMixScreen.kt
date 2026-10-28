@@ -77,6 +77,7 @@ import com.metrolist.music.constants.ShowUploadedPlaylistKey
 import com.metrolist.music.constants.YtmSyncKey
 import com.metrolist.music.db.entities.Album
 import com.metrolist.music.db.entities.Artist
+import com.metrolist.music.db.entities.LocalItem
 import com.metrolist.music.db.entities.Playlist
 import com.metrolist.music.db.entities.PlaylistEntity
 import com.metrolist.music.db.entities.Song
@@ -220,8 +221,8 @@ fun LibraryMixScreen(
     val (showLiked) = rememberPreference(ShowLikedPlaylistKey, true)
     val (showDownloaded) = rememberPreference(ShowDownloadedPlaylistKey, true)
     val (showTop) = rememberPreference(ShowTopPlaylistKey, true)
-    val (showCached) = rememberPreference(ShowCachedPlaylistKey, true)
-    val (showUploaded) = rememberPreference(ShowUploadedPlaylistKey, true)
+    val (showCached) = rememberPreference(ShowCachedPlaylistKey, false)
+    val (showUploaded) = rememberPreference(ShowUploadedPlaylistKey, false)
     
     val showLikedPlaylist = showLiked && matchesNormalizedQuery(normalizedQuery, likedPlaylist.playlist.name)
     val showDownloadedPlaylist =
@@ -237,7 +238,9 @@ fun LibraryMixScreen(
     val songs = viewModel.songs.collectAsStateWithLifecycle()
     val playlist = viewModel.playlists.collectAsStateWithLifecycle()
 
-    var allItems = albums.value + artist.value + playlist.value
+    // Keep the landing view focused on YouTube playlists. Other library items
+    // remain available through the Songs, Albums, Artists and Playlists filters.
+    var allItems: List<LocalItem> = playlist.value.filter { it.playlist.browseId != null }
     val locale = LocalLocale.current.platformLocale
     val collator = remember(locale) {
         Collator.getInstance(locale).apply {
