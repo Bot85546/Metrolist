@@ -139,6 +139,28 @@ import kotlin.jvm.JvmName
 
 const val ActiveBoxAlpha = 0.6f
 
+/**
+ * Compute the aggregate download state in a single pass. Any queued or active
+ * download takes precedence over a partial collection, while the completed
+ * state requires every item to be downloaded. Used by album and playlist tiles.
+ */
+internal inline fun <T> aggregateDownloadBadgeState(
+    songs: List<T>,
+    stateFor: (T) -> Int?,
+): Int {
+    if (songs.isEmpty()) return Download.STATE_STOPPED
+
+    var allCompleted = true
+    for (song in songs) {
+        when (stateFor(song)) {
+            STATE_COMPLETED -> Unit
+            STATE_QUEUED, STATE_DOWNLOADING -> return STATE_DOWNLOADING
+            else -> allCompleted = false
+        }
+    }
+    return if (allCompleted) STATE_COMPLETED else Download.STATE_STOPPED
+}
+
 @Composable
 fun currentGridThumbnailHeight(): Dp {
     val gridItemSize by rememberEnumPreference(GridItemsSizeKey, GridItemSize.BIG)
@@ -732,17 +754,7 @@ fun AlbumListItem(
         val allDownloads by downloadUtil.downloads.collectAsStateWithLifecycle()
 
         val downloadState by remember(songs, allDownloads) {
-            androidx.compose.runtime.mutableIntStateOf(
-                if (songs.isEmpty()) {
-                    Download.STATE_STOPPED
-                } else {
-                    when {
-                        songs.all { allDownloads[it.id]?.state == STATE_COMPLETED } -> STATE_COMPLETED
-                        songs.any { allDownloads[it.id]?.state in listOf(STATE_QUEUED, STATE_DOWNLOADING) } -> STATE_DOWNLOADING
-                        else -> Download.STATE_STOPPED
-                    }
-                }
-            )
+            androidx.compose.runtime.mutableIntStateOf(aggregateDownloadBadgeState(songs) { allDownloads[it.id]?.state })
         }
 
         if (showLikedIcon && album.album.bookmarkedAt != null) {
@@ -803,17 +815,7 @@ fun AlbumGridItem(
         val allDownloads by downloadUtil.downloads.collectAsStateWithLifecycle()
 
         val downloadState by remember(songs, allDownloads) {
-            androidx.compose.runtime.mutableIntStateOf(
-                if (songs.isEmpty()) {
-                    Download.STATE_STOPPED
-                } else {
-                    when {
-                        songs.all { allDownloads[it.id]?.state == STATE_COMPLETED } -> STATE_COMPLETED
-                        songs.any { allDownloads[it.id]?.state in listOf(STATE_QUEUED, STATE_DOWNLOADING) } -> STATE_DOWNLOADING
-                        else -> Download.STATE_STOPPED
-                    }
-                }
-            )
+            androidx.compose.runtime.mutableIntStateOf(aggregateDownloadBadgeState(songs) { allDownloads[it.id]?.state })
         }
 
         if (album.album.bookmarkedAt != null) {
@@ -896,17 +898,7 @@ fun PlaylistListItem(
         val allDownloads by downloadUtil.downloads.collectAsStateWithLifecycle()
 
         val downloadState by remember(songs, allDownloads) {
-            androidx.compose.runtime.mutableIntStateOf(
-                if (songs.isEmpty()) {
-                    Download.STATE_STOPPED
-                } else {
-                    when {
-                        songs.all { allDownloads[it.id]?.state == STATE_COMPLETED } -> STATE_COMPLETED
-                        songs.any { allDownloads[it.id]?.state in listOf(STATE_QUEUED, STATE_DOWNLOADING) } -> STATE_DOWNLOADING
-                        else -> Download.STATE_STOPPED
-                    }
-                }
-            )
+            androidx.compose.runtime.mutableIntStateOf(aggregateDownloadBadgeState(songs) { allDownloads[it.id]?.state })
         }
 
         Icon.Download(downloadState)
@@ -977,17 +969,7 @@ fun PlaylistGridItem(
         val allDownloads by downloadUtil.downloads.collectAsStateWithLifecycle()
 
         val downloadState by remember(songs, allDownloads) {
-            mutableIntStateOf(
-                if (songs.isEmpty()) {
-                    Download.STATE_STOPPED
-                } else {
-                    when {
-                        songs.all { allDownloads[it.id]?.state == STATE_COMPLETED } -> STATE_COMPLETED
-                        songs.any { allDownloads[it.id]?.state in listOf(STATE_QUEUED, STATE_DOWNLOADING) } -> STATE_DOWNLOADING
-                        else -> Download.STATE_STOPPED
-                    }
-                }
-            )
+            mutableIntStateOf(aggregateDownloadBadgeState(songs) { allDownloads[it.id]?.state })
         }
 
         Icon.Download(downloadState)
