@@ -109,7 +109,6 @@ import com.metrolist.music.viewmodels.LibraryMixViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.Collator
-import java.time.LocalDateTime
 import java.util.UUID
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
@@ -233,59 +232,31 @@ fun LibraryMixScreen(
     val showCachedPlaylists = showCached && matchesNormalizedQuery(normalizedQuery, cachedPlaylist.playlist.name)
 
 
-    val albums = viewModel.albums.collectAsStateWithLifecycle()
-    val artist = viewModel.artists.collectAsStateWithLifecycle()
     val songs = viewModel.songs.collectAsStateWithLifecycle()
     val playlist = viewModel.playlists.collectAsStateWithLifecycle()
 
-    // Keep the landing view focused on YouTube playlists. Other library items
-    // remain available through the Songs, Albums, Artists and Playlists filters.
-    var allItems: List<LocalItem> = playlist.value.filter { it.playlist.browseId != null }
+    // The custom Library landing view only displays saved YouTube playlists.
+    // Cache filtering and sorting until playlist data or sort preferences change:
+    // playback-state recompositions must not re-sort the entire Library.
+    val savedPlaylists = playlist.value
     val locale = LocalLocale.current.platformLocale
     val collator = remember(locale) {
         Collator.getInstance(locale).apply {
             strength = Collator.PRIMARY
         }
     }
-    allItems =
+    val allItems = remember(savedPlaylists, sortType, sortDescending, collator) {
+        val youtubePlaylists = savedPlaylists.filter { it.playlist.browseId != null }
         when (sortType) {
-            MixSortType.CREATE_DATE -> {
-                allItems.sortedBy { item ->
-                    when (item) {
-                        is Album -> item.album.bookmarkedAt
-                        is Artist -> item.artist.bookmarkedAt
-                        is Playlist -> item.playlist.createdAt
-                        is Song -> LocalDateTime.now()
-                    }
-                }
-            }
-
-            MixSortType.NAME -> {
-                allItems.sortedWith(
-                    compareBy(collator) { item ->
-                        when (item) {
-                            is Album -> item.album.title
-                            is Artist -> item.artist.name
-                            is Playlist -> item.playlist.name
-                            is Song -> ""
-                        }
-                    },
-                )
-            }
-
-            MixSortType.LAST_UPDATED -> {
-                allItems.sortedBy { item ->
-                    when (item) {
-                        is Album -> item.album.lastUpdateTime
-                        is Artist -> item.artist.lastUpdateTime
-                        is Playlist -> item.playlist.lastUpdateTime
-                        is Song -> LocalDateTime.now()
-                    }
-                }
-            }
+            MixSortType.CREATE_DATE -> youtubePlaylists.sortedBy { it.playlist.createdAt }
+            MixSortType.NAME -> youtubePlaylists.sortedWith(compareBy(collator) { it.playlist.name })
+            MixSortType.LAST_UPDATED -> youtubePlaylists.sortedBy { it.playlist.lastUpdateTime }
         }.reversed(sortDescending)
+    }
 
-    val searchableItems = if (normalizedQuery.isBlank()) allItems else allItems + songs.value
+    val searchableItems: List<LocalItem> = remember(allItems, songs.value, normalizedQuery) {
+        if (normalizedQuery.isBlank()) allItems else allItems + songs.value
+    }
 
     val filteredItems = remember(searchableItems, normalizedQuery, collator) {
         val matchedItems =
