@@ -4490,7 +4490,23 @@ class MusicService :
             }
         }
 
-        return super.onStartCommand(intent, flags, startId)
+        val result = super.onStartCommand(intent, flags, startId)
+        // Widget refreshes and controls must not leave a started service behind
+        // when no playback is active. Playlist/alarms are asynchronous and must
+        // remain alive until they have initiated playback.
+        val isSimpleWidgetRequest = when (intent?.action) {
+            MusicWidgetReceiver.ACTION_UPDATE_WIDGET,
+            PlaylistWidgetReceiver.ACTION_UPDATE_WIDGET,
+            MusicWidgetReceiver.ACTION_LIKE,
+            MusicWidgetReceiver.ACTION_NEXT,
+            MusicWidgetReceiver.ACTION_PREVIOUS,
+            MusicWidgetReceiver.ACTION_PLAY_PAUSE -> true
+            else -> false
+        }
+        if (isSimpleWidgetRequest && !hasActivePlaybackIntent()) {
+            stopSelf(startId)
+        }
+        return result
     }
 
 
