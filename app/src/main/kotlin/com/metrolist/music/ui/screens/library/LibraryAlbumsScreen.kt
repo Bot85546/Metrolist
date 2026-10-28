@@ -154,10 +154,16 @@ fun LibraryAlbumsScreen(
 
     val filteredAlbums = remember(albums, hideExplicit, normalizedQuery) {
         val visibleAlbums = if (hideExplicit) albums.filter { !it.album.explicit } else albums
-        visibleAlbums.filter { album ->
-            val artistNames = album.artists.map { it.name }.toTypedArray()
-            matchesNormalizedQuery(normalizedQuery, album.album.title, *artistNames)
-        }.distinctBy { it.id }
+        val matchedAlbums = if (normalizedQuery.isBlank()) {
+            // A blank query matches everything; avoid per-album artist arrays.
+            visibleAlbums
+        } else {
+            visibleAlbums.filter { album ->
+                val artistNames = album.artists.map { it.name }.toTypedArray()
+                matchesNormalizedQuery(normalizedQuery, album.album.title, *artistNames)
+            }
+        }
+        matchedAlbums.distinctBy { it.id }
     }
 
     val lazyListState = rememberLazyListState()
