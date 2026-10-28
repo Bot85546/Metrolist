@@ -71,7 +71,7 @@ jobs:
         run: ./gradlew --console=plain assembleGmsDebug --warning-mode summary
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
-          METROLIST_APPLICATION_ID: com.metrolist.music.custom
+          METROLIST_APPLICATION_ID: com.metrolitt.music
           METROLIST_APP_NAME: Metrolitt
           METROLIST_DEBUG_KEYSTORE_PATH: pr-debug.keystore
           PULL_REQUEST: "true"
@@ -81,5 +81,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v7
         with:
-          name: metrolist-custom-debug-apk
+          name: metrolitt-debug-apk
           path: app/build/outputs/apk/gms/debug/*.apk
