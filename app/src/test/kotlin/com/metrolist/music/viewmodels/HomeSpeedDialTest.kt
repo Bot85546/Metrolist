@@ -51,6 +51,28 @@ class HomeSpeedDialTest {
         )
     }
 
+    @Test
+    fun `speed dial stops consuming lazy home recommendations after 27 items`() {
+        var visited = 0
+        val home = Iterable {
+            (0 until 1000).asSequence().map {
+                visited++
+                song("home-$it")
+            }.iterator()
+        }
+
+        val result = buildSpeedDialItems(
+            pinned = emptyList(),
+            keepListening = emptyList(),
+            quickPicks = emptyList(),
+            home = home,
+        )
+
+        assertEquals(27, result.size)
+        assertEquals((0 until 27).map { "home-$it" }, result.map { it.id })
+        assertEquals(27, visited)
+    }
+
     private fun song(id: String) =
         SongItem(
             id = id,
