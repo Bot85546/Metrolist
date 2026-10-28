@@ -8,6 +8,7 @@ package com.metrolist.music.utils
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import java.io.ByteArrayOutputStream
 import android.net.Uri
 import androidx.core.graphics.createBitmap
 import androidx.core.net.toUri
@@ -22,6 +23,8 @@ import coil3.toBitmap
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.guava.future
 import timber.log.Timber
 
@@ -87,6 +90,33 @@ class CoilBitmapLoader(
                 createFallbackBitmap()
             }
         }
+
+    // Provide a compact embedded cover for other devices (notably Wear OS), which
+    // may not reliably load the artwork URL advertised by a phone media session.
+    // Never block playback while the cover is fetched or encoded.
+    suspend fun loadPortableArtwork(uri: Uri): ByteArray? = withContext(Dispatchers.IO) {
+        try {
+            val request = ImageRequest.Builder(context)
+                .data(uri)
+                .size(384, 384)
+                .allowHardware(false)
+                .build()
+            val result = context.imageLoader.execute(request) as? SuccessResult
+                ?: return@withContext null
+
+            ByteArrayOutputStream().use { output ->
+                if (!result.image.toBitmap().compress(Bitmap.CompressFormat.JPEG, 80, output)) {
+                    return@withContext null
+                }
+                output.toByteArray().takeIf { it.size <= 128 * 1024 }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Timber.tag("CoilBitmapLoader").w(e, "Failed to encode portable artwork")
+            null
+        }
+    }
 
     override fun loadBitmapFromMetadata(metadata: MediaMetadata): ListenableFuture<Bitmap>? {
         metadata.artworkData?.let { return decodeBitmap(it) }
