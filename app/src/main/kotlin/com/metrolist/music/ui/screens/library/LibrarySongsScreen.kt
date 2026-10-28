@@ -66,7 +66,6 @@ import com.metrolist.music.LocalPlayerConnection
 import com.metrolist.music.R
 import com.metrolist.music.constants.CONTENT_TYPE_HEADER
 import com.metrolist.music.constants.CONTENT_TYPE_SONG
-import com.metrolist.music.constants.HideExplicitKey
 import com.metrolist.music.constants.SongFilter
 import com.metrolist.music.constants.SongFilterKey
 import com.metrolist.music.constants.SongSortDescendingKey
@@ -125,7 +124,6 @@ fun LibrarySongsScreen(
     val (sortDescending, onSortDescendingChange) = rememberPreference(SongSortDescendingKey, true)
 
     val (ytmSync) = rememberPreference(YtmSyncKey, true)
-    val hideExplicit by rememberPreference(key = HideExplicitKey, defaultValue = false)
 
     val songs by viewModel.allSongs.collectAsStateWithLifecycle()
     var isSearchActive by rememberSaveable { mutableStateOf(false) }
@@ -265,12 +263,12 @@ fun LibrarySongsScreen(
     // Playback-related recompositions must not rebuild the whole song list.
     // Empty search queries already match every song, so skip artist-name
     // allocations and string normalization when no filtering is needed.
-    val filteredSongs = remember(songs, hideExplicit, normalizedQuery) {
-        val visibleSongs = if (hideExplicit) songs.filter { !it.song.explicit } else songs
+    val filteredSongs = remember(songs, normalizedQuery) {
+        // Explicit/video preferences are already applied in LibrarySongsViewModel.
         if (normalizedQuery.isBlank()) {
-            visibleSongs
+            songs
         } else {
-            visibleSongs.filter { song ->
+            songs.filter { song ->
                 val artistNames = song.artists.map { it.name }.toTypedArray()
                 matchesNormalizedQuery(normalizedQuery, song.song.title, song.album?.title, *artistNames)
             }
