@@ -265,7 +265,11 @@ fun LibraryMixScreen(
     }
 
     val filteredItems = remember(searchableItems, normalizedQuery, collator) {
-        val matchedItems =
+        // All entries match an empty query; avoid allocating a second list
+        // and testing every playlist name on the normal Library landing view.
+        val matchedItems = if (normalizedQuery.isBlank()) {
+            searchableItems
+        } else {
             searchableItems.filter { item ->
                 when (item) {
                     is Song -> {
@@ -282,6 +286,7 @@ fun LibraryMixScreen(
                     is Playlist -> matchesNormalizedQuery(normalizedQuery, item.playlist.name)
                 }
             }
+        }
 
         if (normalizedQuery.isBlank()) {
             matchedItems.distinctBy { it.id }
