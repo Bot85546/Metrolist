@@ -262,15 +262,20 @@ fun LibrarySongsScreen(
         }
     }
 
-    val filteredSongs =
-        (if (hideExplicit) {
-            songs.filter { !it.song.explicit }
+    // Playback-related recompositions must not rebuild the whole song list.
+    // Empty search queries already match every song, so skip artist-name
+    // allocations and string normalization when no filtering is needed.
+    val filteredSongs = remember(songs, hideExplicit, normalizedQuery) {
+        val visibleSongs = if (hideExplicit) songs.filter { !it.song.explicit } else songs
+        if (normalizedQuery.isBlank()) {
+            visibleSongs
         } else {
-            songs
-        }).filter { song ->
-            val artistNames = song.artists.map { it.name }.toTypedArray()
-            matchesNormalizedQuery(normalizedQuery, song.song.title, song.album?.title, *artistNames)
+            visibleSongs.filter { song ->
+                val artistNames = song.artists.map { it.name }.toTypedArray()
+                matchesNormalizedQuery(normalizedQuery, song.song.title, song.album?.title, *artistNames)
+            }
         }
+    }
 
     // Upload progress dialog
     if (showUploadDialog) {
