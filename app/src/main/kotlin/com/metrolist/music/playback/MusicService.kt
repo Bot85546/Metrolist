@@ -407,6 +407,8 @@ class MusicService :
     private var taskCleared = false
     private var lastSavedPlayerState: PersistPlayerState? = null
     private var mediaSession: MediaLibrarySession? = null
+    private val sessionArtworkLoader by lazy { CoilBitmapLoader(this, scope) }
+    private var portableArtworkJob: Job? = null
     private var controllerFuture: com.google.common.util.concurrent.ListenableFuture<MediaController>? = null
 
     private val playerInitialized = MutableStateFlow(false)
@@ -709,7 +711,7 @@ class MusicService :
                         Intent(this, MainActivity::class.java),
                         PendingIntent.FLAG_IMMUTABLE,
                     ),
-                ).setBitmapLoader(CoilBitmapLoader(this, scope))
+                ).setBitmapLoader(sessionArtworkLoader)
                 .build()
         player.repeatMode = startupPrefs!![RepeatModeKey] ?: REPEAT_MODE_OFF
 
@@ -2528,6 +2530,36 @@ class MusicService :
         }
     }
 
+    private fun publishPortableArtwork(mediaItem: MediaItem?) {
+        portableArtworkJob?.cancel()
+        val artworkUri = mediaItem?.mediaMetadata?.artworkUri ?: return
+        if (mediaItem.mediaMetadata.artworkData != null) return
+        val mediaId = mediaItem.mediaId
+
+        portableArtworkJob = scope.launch {
+            val artwork = sessionArtworkLoader.loadPortableArtwork(artworkUri)
+                ?: return@launch
+            // Never put artwork from an earlier song into the current media session.
+            val current = player.currentMediaItem ?: return@launch
+            if (current.mediaId != mediaId ||
+                current.mediaMetadata.artworkUri != artworkUri ||
+                current.mediaMetadata.artworkData != null
+            ) return@launch
+
+            val updated = current.buildUpon()
+                .setMediaMetadata(
+                    current.mediaMetadata.buildUpon()
+                        .setArtworkData(
+                            artwork,
+                            androidx.media3.common.MediaMetadata.PICTURE_TYPE_FRONT_COVER,
+                        )
+                        .build(),
+                )
+                .build()
+            player.replaceMediaItem(player.currentMediaItemIndex, updated)
+        }
+    }
+
     override fun onMediaItemTransition(
         mediaItem: MediaItem?,
         reason: Int,
@@ -2542,6 +2574,7 @@ class MusicService :
             }
         }
         lastTransitionedMediaId = mediaItem?.mediaId
+        publishPortableArtwork(mediaItem)
         initialBufferRecoveryJob?.cancel()
         initialBufferRecoveryJob = null
         initialBufferRecoveryAttemptedMediaId = null
