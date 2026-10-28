@@ -4072,8 +4072,15 @@ class MusicService :
     ) {
         val mediaItem = eventTime.timeline.getWindow(eventTime.windowIndex, Timeline.Window()).mediaItem
         val historyDurationMs = dataStore[HistoryDuration]?.times(1000f) ?: 30000f
+        // A qualifying listen should be saved even when the track is shorter than the
+        // user's minimum history duration (30 seconds by default). This is based on
+        // actual listening time, not the seek position, so skipping to the end does
+        // not create a play. Unknown-duration tracks retain the history-duration rule.
+        val qualifiesAsPlay = mediaItem.metadata?.duration?.takeIf { it > 0 }?.let { durationSeconds ->
+            playbackStats.totalPlayTimeMs > durationSeconds.toLong() * 700L
+        } ?: false
 
-        if (playbackStats.totalPlayTimeMs >= historyDurationMs &&
+        if ((playbackStats.totalPlayTimeMs >= historyDurationMs || qualifiesAsPlay) &&
             !dataStore.get(PauseListenHistoryKey, false)
         ) {
             database.query {
