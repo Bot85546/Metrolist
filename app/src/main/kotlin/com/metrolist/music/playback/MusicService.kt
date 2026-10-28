@@ -13,6 +13,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -85,11 +86,14 @@ import androidx.media3.extractor.mp4.FragmentedMp4Extractor
 import androidx.media3.extractor.mp4.Mp4Extractor
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
+import androidx.media3.session.MediaController
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaNotification
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionToken
 import com.google.common.collect.ImmutableList
+import com.google.common.util.concurrent.MoreExecutors
 import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.WatchEndpoint
@@ -406,6 +410,8 @@ class MusicService :
     private val sessionArtworkLoader by lazy { CoilBitmapLoader(this, scope) }
     private var portableArtworkJob: Job? = null
     private var portableArtworkReplacementId: String? = null
+    private var controllerFuture: com.google.common.util.concurrent.ListenableFuture<MediaController>? = null
+    private var foregroundRequestedForPlayback = false
 
     private val playerInitialized = MutableStateFlow(false)
     val isPlayerReady: kotlinx.coroutines.flow.StateFlow<Boolean> = playerInitialized.asStateFlow()
@@ -620,8 +626,8 @@ class MusicService :
         historyPaused = startupPrefs!![PauseListenHistoryKey] ?: false
         historyDurationMs = ((startupPrefs!![HistoryDuration] ?: 30f) * 1000).toLong()
 
-        // 3. Connect the processor to the service
-        // handled in createExoPlayer
+        // The player is created without an idle foreground notification.
+        // Playback itself activates the controller and foreground state.
 
         seedLoudnessCacheFromPrefs()
 
@@ -2566,6 +2572,7 @@ class MusicService :
         }
         lastTransitionedMediaId = mediaItem?.mediaId
         publishPortableArtwork(mediaItem)
+        activatePlaybackNotification()
         initialBufferRecoveryJob?.cancel()
         initialBufferRecoveryJob = null
         initialBufferRecoveryAttemptedMediaId = null
@@ -2748,6 +2755,9 @@ class MusicService :
 
         if (playWhenReady) {
             applyCachedAudioNormalizationNow()
+            activatePlaybackNotification()
+        } else {
+            foregroundRequestedForPlayback = false
         }
 
         updateInitialBufferRecovery(player.playbackState)
@@ -4295,6 +4305,59 @@ class MusicService :
             castConnectionHandler?.isCasting?.value == true
     }
 
+    /**
+     * The session's internal MediaController must be connected for reliable
+     * Media3 notifications on some devices. Unlike the old implementation,
+     * create it only for actual playback, not every time the app opens.
+     */
+    private fun connectPlaybackNotificationController() {
+        if (controllerFuture != null || mediaSession == null) return
+        val token = SessionToken(this, ComponentName(this, MusicService::class.java))
+        val future = MediaController.Builder(this, token).buildAsync()
+        controllerFuture = future
+        future.addListener({
+            try {
+                future.get()
+            } catch (error: Exception) {
+                Timber.tag(TAG).w(error, "Failed to connect playback notification controller")
+                if (controllerFuture === future) {
+                    controllerFuture = null
+                    MediaController.releaseFuture(future)
+                }
+            }
+        }, MoreExecutors.directExecutor())
+    }
+
+    /**
+     * Foreground playback is requested only when a playable item is starting.
+     * The actual media controls replace the temporary foreground notification
+     * as Media3 publishes its playback metadata.
+     */
+    private fun activatePlaybackNotification() {
+        if (mediaSession == null ||
+            !::player.isInitialized ||
+            !player.playWhenReady ||
+            player.currentMediaItem == null ||
+            castConnectionHandler?.isCasting?.value == true
+        ) return
+
+        connectPlaybackNotificationController()
+        if (!foregroundRequestedForPlayback) {
+            foregroundRequestedForPlayback = tryEnsureForegroundWithLatestNotification()
+        }
+    }
+
+    /**
+     * Disconnect our extra controller when the UI leaves with playback idle,
+     * so it does not keep an unused service bound indefinitely.
+     */
+    fun releaseIdlePlaybackNotificationController() {
+        if (hasActivePlaybackIntent()) return
+        controllerFuture?.let { MediaController.releaseFuture(it) }
+        controllerFuture = null
+        foregroundRequestedForPlayback = false
+    }
+
     override fun onDestroy() {
         isRunning = false
 
@@ -4352,6 +4415,8 @@ class MusicService :
         player.removeListener(this)
         sleepTimer?.let { player.removeListener(it) }
         initialBufferRecoveryJob?.cancel()
+        controllerFuture?.let { MediaController.releaseFuture(it) }
+        controllerFuture = null
         releaseExoPlayer(player)
         scope.cancel()
         super.onDestroy()
@@ -4399,6 +4464,9 @@ class MusicService :
             }
         }.onFailure { Timber.tag(TAG).e(it, "Failed to stop playback on task clear") }
         latestMediaNotification = null
+        controllerFuture?.let { MediaController.releaseFuture(it) }
+        controllerFuture = null
+        foregroundRequestedForPlayback = false
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID)
         // Media3: coordinates notification/foreground teardown and stopSelf; required when
