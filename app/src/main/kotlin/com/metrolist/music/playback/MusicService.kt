@@ -898,11 +898,18 @@ class MusicService :
             }
             .distinctUntilChanged()
             .collectLatest(scope) { (normalizeAudio, loudnessLevel) ->
+                // Initial preferences were already loaded before player creation.
+                // Reapplying an identical initial emission can cause a needless
+                // normalization update while the first song is starting.
+                if (normalizeAudio == normalizationEnabledCached &&
+                    loudnessLevel == loudnessLevelCached
+                ) {
+                    return@collectLatest
+                }
                 normalizationEnabledCached = normalizeAudio
                 loudnessLevelCached = loudnessLevel
-                // Only an explicit settings change should recompute the active
-                // track's gain. Database metadata updates must not cause a
-                // delayed jump in volume after audio has started.
+                // Recompute only for actual user changes, not database updates.
+                // The audio processor smooths any gain change during playback.
                 applyPreparedAudioNormalizationNow()
             }
 
