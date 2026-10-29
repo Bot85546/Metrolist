@@ -151,6 +151,49 @@ class VolumeNormalizationAudioProcessorTest {
         org.junit.Assert.assertTrue(kotlin.math.abs(next - previous) <= 2)
     }
 
+    @Test
+    fun `gapless track transition snaps immediately even when prior gain was ramping`() {
+        val processor = configuredProcessor()
+        processor.enabled = true
+        processor.setTargetGain(0)
+        processor.queueInput(pcm16Buffer(frames = 1))
+        processor.output
+
+        // Simulate an ordinary correction still fading when the user skips.
+        processor.setTargetGain(-600)
+        processor.queueInput(pcm16Buffer(frames = 500))
+        processor.output
+
+        // A selected track must use its prepared gain from its first frame.
+        processor.setTargetGain(600, immediate = true)
+        processor.queueInput(pcm16Buffer(frames = 1))
+        val nextTrack = processor.output.order(ByteOrder.LITTLE_ENDIAN)
+        val left = nextTrack.getShort().toInt()
+        val right = nextTrack.getShort().toInt()
+        assertEquals(left, right)
+        org.junit.Assert.assertTrue(left in 19_900..20_000)
+    }
+
+    @Test
+    fun `a user volume setting change still ramps while playback continues`() {
+        val processor = configuredProcessor()
+        processor.enabled = true
+        processor.setTargetGain(-600, immediate = true)
+        processor.queueInput(pcm16Buffer(frames = 1))
+        processor.output
+
+        // Deliberately omit immediate=true: this is not a track transition.
+        processor.setTargetGain(0)
+        processor.queueInput(pcm16Buffer(frames = 1))
+        val first = processor.output.order(ByteOrder.LITTLE_ENDIAN).getShort().toInt()
+        org.junit.Assert.assertTrue(first in 5_000..5_100)
+
+        processor.queueInput(pcm16Buffer(frames = 2_880))
+        val finished = processor.output.order(ByteOrder.LITTLE_ENDIAN)
+        val last = finished.getShort(finished.limit() - 4).toInt()
+        assertEquals(10_000, last)
+    }
+
     private fun pcm16Buffer(frames: Int): ByteBuffer =
         ByteBuffer.allocateDirect(frames * 2 * Short.SIZE_BYTES)
             .order(ByteOrder.LITTLE_ENDIAN)
