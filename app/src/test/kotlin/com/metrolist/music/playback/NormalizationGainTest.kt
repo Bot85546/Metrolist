@@ -64,4 +64,22 @@ class NormalizationGainTest {
         ))
     }
 
+    @Test
+    fun `both YouTube loudness fields give the same gain for equivalent measurements`() {
+        // YouTube's loudnessDb and perceptualLoudnessDb are on different
+        // reference scales; the legacy field must not shift songs by 7 dB.
+        val measured = -12.44
+        val relative = -5.44
+        assertEquals(
+            normalizationGainMb(null, measured, -14f),
+            normalizationGainMb(relative, null, -14f),
+        )
+    }
+
+    @Test
+    fun `balanced loudness highlights the cap on quiet recordings`() {
+        assertEquals(-500, normalizationGainMb(null, -9.0, -14f))
+        assertEquals(600, normalizationGainMb(null, -24.0, -14f))
+    }
+
 }
