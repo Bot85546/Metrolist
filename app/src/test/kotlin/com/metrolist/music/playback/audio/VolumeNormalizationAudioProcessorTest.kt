@@ -194,6 +194,39 @@ class VolumeNormalizationAudioProcessorTest {
         assertEquals(10_000, last)
     }
 
+    @Test
+    fun `float PCM remains frame aligned and introduces no buffering during a ramp`() {
+        val processor = VolumeNormalizationAudioProcessor().apply {
+            configure(AudioProcessor.AudioFormat(48_000, 2, C.ENCODING_PCM_FLOAT))
+            flush()
+            enabled = true
+            setTargetGain(0)
+        }
+
+        fun stereoFrames(count: Int) =
+            ByteBuffer.allocateDirect(count * 2 * Float.SIZE_BYTES)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .apply {
+                    repeat(count * 2) { putFloat(0.5f) }
+                    flip()
+                }
+
+        processor.queueInput(stereoFrames(1))
+        val original = processor.output.order(ByteOrder.LITTLE_ENDIAN)
+        assertEquals(8, original.remaining())
+        assertEquals(0.5f, original.getFloat(), 0.00001f)
+        assertEquals(0.5f, original.getFloat(), 0.00001f)
+
+        processor.setTargetGain(-600)
+        processor.queueInput(stereoFrames(2_880))
+        val ramped = processor.output.order(ByteOrder.LITTLE_ENDIAN)
+        assertEquals(2_880 * 2 * Float.SIZE_BYTES, ramped.remaining())
+        val lastLeft = ramped.getFloat(ramped.limit() - 8)
+        val lastRight = ramped.getFloat(ramped.limit() - 4)
+        assertEquals(lastLeft, lastRight, 0.00001f)
+        assertEquals((0.5 * 10.0.pow(-0.3)).toFloat(), lastLeft, 0.00001f)
+    }
+
     private fun pcm16Buffer(frames: Int): ByteBuffer =
         ByteBuffer.allocateDirect(frames * 2 * Short.SIZE_BYTES)
             .order(ByteOrder.LITTLE_ENDIAN)
