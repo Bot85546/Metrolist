@@ -56,7 +56,7 @@ class VolumeNormalizationAudioProcessorTest {
         )
         val output = processor.output.order(ByteOrder.LITTLE_ENDIAN)
 
-        assertEquals((1000 * 10.0.pow(0.3)).toInt().toShort(), output.short)
+        assertEquals((1000 * 10.0.pow(0.3)).toInt().toShort(), output.getShort())
     }
 
     private fun configuredProcessor() = VolumeNormalizationAudioProcessor().apply {
