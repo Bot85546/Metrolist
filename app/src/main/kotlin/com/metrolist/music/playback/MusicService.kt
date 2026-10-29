@@ -2296,11 +2296,13 @@ class MusicService :
     private fun applyPreparedAudioNormalizationNow(immediate: Boolean = false) {
         if (!::player.isInitialized) return
         val processor = playerNormalizationProcessors[player] ?: return
-        val loudness = player.currentMediaItem?.mediaId?.let(trackLoudnessCache::get)
+        val mediaId = player.currentMediaItem?.mediaId
+        val loudness = mediaId?.let(trackLoudnessCache::get)
         applyAudioNormalization(
             processor = processor,
             loudnessDb = loudness?.loudnessDb,
             perceptualLoudnessDb = loudness?.perceptualLoudnessDb,
+            relativeReferenceLufs = mediaId?.let(trackLoudnessCache::referenceFor),
             immediate = immediate,
         )
     }
@@ -2309,11 +2311,17 @@ class MusicService :
         processor: VolumeNormalizationAudioProcessor,
         loudnessDb: Double?,
         perceptualLoudnessDb: Double?,
+        relativeReferenceLufs: Double? = null,
         immediate: Boolean = false,
     ) {
         val gain =
             if (normalizationEnabledCached) {
-                normalizationGainMb(loudnessDb, perceptualLoudnessDb, loudnessLevelCached.targetLufs)
+                normalizationGainMb(
+                    loudnessDb,
+                    perceptualLoudnessDb,
+                    loudnessLevelCached.targetLufs,
+                    relativeReferenceLufs,
+                )
                     ?: fallbackNormalizationGainMb(loudnessLevelCached.targetLufs)
             } else {
                 null
@@ -2359,6 +2367,7 @@ class MusicService :
                 processor = processor,
                 loudnessDb = prepared.loudnessDb,
                 perceptualLoudnessDb = prepared.perceptualLoudnessDb,
+                relativeReferenceLufs = trackLoudnessCache.referenceFor(mediaId),
                 // Existing playback gets a short correction ramp; loading a
                 // newly selected track must begin at the prepared gain.
                 immediate = !targetPlayer.isPlaying || targetPlayer.currentPosition <= 100L,
@@ -3902,7 +3911,16 @@ class MusicService :
                     mediaId = mediaId,
                     loudnessDb = loudnessDb,
                     perceptualLoudnessDb = perceptualLoudnessDb,
+                    clientName = nonNullPlayback.streamClient,
                 )
+
+                // An incomplete response must not erase a valid previous absolute
+                // measurement in Room. Otherwise a restart could resurrect the
+                // ambiguous relative-only path even for a previously known song.
+                val persistentRelative = loudnessDb?.takeIf { it.isFinite() }
+                    ?: storedFormat?.loudnessDb?.takeIf { it.isFinite() }
+                val persistentAbsolute = perceptualLoudnessDb?.takeIf { it.isFinite() }
+                    ?: storedFormat?.perceptualLoudnessDb?.takeIf { it.isFinite() }
 
                 format.contentLength?.let { contentLength ->
                     database.query {
@@ -3920,8 +3938,8 @@ class MusicService :
                                 bitrate = format.bitrate,
                                 sampleRate = format.audioSampleRate,
                                 contentLength = contentLength,
-                                loudnessDb = loudnessDb,
-                                perceptualLoudnessDb = perceptualLoudnessDb,
+                                loudnessDb = persistentRelative,
+                                perceptualLoudnessDb = persistentAbsolute,
                                 playbackUrl = nonNullPlayback.playbackTracking?.videostatsPlaybackUrl?.baseUrl,
                             ),
                         )
@@ -5131,12 +5149,16 @@ internal fun normalizationGainMb(
     loudnessDb: Double?,
     perceptualLoudnessDb: Double?,
     targetLufs: Float,
+    relativeReferenceLufs: Double? = null,
 ): Int? {
     if (!targetLufs.isFinite()) return null
-    // shortcut: legacy-only metadata has no client reference tag; retain the
-    // existing Music-client -7 dB reference until the extractor exposes one.
+    // Absolute perceptual loudness is the only directly comparable measurement.
+    // Relative loudness must be anchored to a reference learned from the same
+    // YouTube extraction client; assuming -7 mis-scales clients targeting -14.
     val measuredLufs = perceptualLoudnessDb?.takeIf { it.isFinite() }
-        ?: loudnessDb?.takeIf { it.isFinite() }?.let { it - 7.0 }
+        ?: loudnessDb?.takeIf { it.isFinite() }?.let { relative ->
+            relativeReferenceLufs?.takeIf { it.isFinite() }?.let { reference -> relative + reference }
+        }
         ?: return null
     return ((targetLufs.toDouble() - measuredLufs) * 100.0)
         .coerceIn(-3000.0, 1200.0)
