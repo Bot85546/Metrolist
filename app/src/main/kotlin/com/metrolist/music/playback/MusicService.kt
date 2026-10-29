@@ -352,11 +352,6 @@ class MusicService :
             .flatMapLatest { mediaMetadata ->
                 database.song(mediaMetadata?.id)
             }.stateIn(scope, SharingStarted.Lazily, null)
-    private val currentFormat =
-        currentMediaMetadata.flatMapLatest { mediaMetadata ->
-            database.format(mediaMetadata?.id)
-        }
-
     lateinit var playerVolume: MutableStateFlow<Float>
     val isMuted = MutableStateFlow(false)
     private val sleepTimerVolumeMultiplier = MutableStateFlow(1f)
@@ -434,19 +429,15 @@ class MusicService :
     private val historyReporters = HashMap<Player, YouTubeHistoryReporter>()
     private val playerNormalizationProcessors = HashMap<Player, VolumeNormalizationAudioProcessor>()
     private val playerEqualizerProcessors = HashMap<Player, CustomEqualizerAudioProcessor>()
-
-    private var loudnessSetupJob: Job? = null
-    private var loudnessSetupGeneration: Long = 0L
+    // The stream resolver records loudness for both active and prebuffered tracks.
+    // Player changes must not require another database round-trip for the gain.
+    private val trackLoudnessCache = TrackLoudnessCache()
 
     @Volatile
     private var normalizationEnabledCached: Boolean = false
 
     @Volatile
     private var loudnessLevelCached: LoudnessLevel = LoudnessLevel.BALANCED
-
-    private var cachedNormalizationMediaId: String? = null
-    private var cachedNormalizationGainMb: Int? = null
-    private var cachedNormalizationEnabled: Boolean = false
 
     @Volatile private var discordRpcEnabled = false
     @Volatile private var lastDiscordReconnectAttemptAtMs: Long = 0L
@@ -900,21 +891,20 @@ class MusicService :
                 }
             }
 
-        combine(
-            currentFormat,
-            dataStore.data
-                .map { it[AudioNormalizationKey] ?: true }
-                .distinctUntilChanged(),
-            dataStore.data
-                .map { prefs -> prefs[LoudnessLevelKey].toEnum(LoudnessLevel.BALANCED) }
-                .distinctUntilChanged(),
-        ) { format, normalizeAudio, loudnessLevel ->
-            Triple(format, normalizeAudio, loudnessLevel)
-        }.collectLatest(scope) { (_, normalizeAudio, loudnessLevel) ->
-            normalizationEnabledCached = normalizeAudio
-            loudnessLevelCached = loudnessLevel
-            setupAudioNormalization()
-        }
+        dataStore.data
+            .map { prefs ->
+                (prefs[AudioNormalizationKey] ?: true) to
+                    prefs[LoudnessLevelKey].toEnum(LoudnessLevel.BALANCED)
+            }
+            .distinctUntilChanged()
+            .collectLatest(scope) { (normalizeAudio, loudnessLevel) ->
+                normalizationEnabledCached = normalizeAudio
+                loudnessLevelCached = loudnessLevel
+                // Only an explicit settings change should recompute the active
+                // track's gain. Database metadata updates must not cause a
+                // delayed jump in volume after audio has started.
+                applyPreparedAudioNormalizationNow()
+            }
 
         combine(
             dataStore.data.map { it[AudioOffload] ?: false },
@@ -2278,32 +2268,36 @@ class MusicService :
         )
     }
 
+
     private fun applyCachedAudioNormalizationNow() {
         if (isCrossfading) return
+        applyPreparedAudioNormalizationNow()
+    }
+
+    /**
+     * Runs on the service/player thread at a media-item transition, before
+     * another asynchronous database lookup would have completed. If the next
+     * item was prebuffered, its stream resolver has already recorded metadata.
+     *
+     * When metadata is missing, clear the previous track's gain immediately;
+     * the resolver will apply the new track's gain before providing its audio
+     * bytes, if loudness data becomes available.
+     */
+    private fun applyPreparedAudioNormalizationNow() {
+        if (!::player.isInitialized) return
         val processor = playerNormalizationProcessors[player] ?: return
-        try {
-            val gain = cachedNormalizationGainMb
-            if (cachedNormalizationMediaId == player.currentMediaItem?.mediaId &&
-                cachedNormalizationEnabled &&
-                gain != null
-            ) {
-                processor.setTargetGain(gain)
-                processor.enabled = true
-            } else {
-                processor.enabled = false
-            }
-        } catch (e: Exception) {
-            reportException(e)
-            processor.enabled = false
-        }
+        val loudness = player.currentMediaItem?.mediaId?.let(trackLoudnessCache::get)
+        applyAudioNormalization(
+            processor = processor,
+            loudnessDb = loudness?.loudnessDb,
+            perceptualLoudnessDb = loudness?.perceptualLoudnessDb,
+        )
     }
 
     private fun applyAudioNormalization(
         processor: VolumeNormalizationAudioProcessor,
-        mediaId: String,
         loudnessDb: Double?,
         perceptualLoudnessDb: Double?,
-        updateCache: Boolean,
     ) {
         val gain =
             if (normalizationEnabledCached) {
@@ -2319,12 +2313,6 @@ class MusicService :
             processor.setTargetGain(0)
             processor.enabled = false
         }
-
-        if (updateCache) {
-            cachedNormalizationMediaId = mediaId
-            cachedNormalizationGainMb = gain
-            cachedNormalizationEnabled = gain != null
-        }
     }
 
     private fun applyAudioNormalizationBeforePlayback(
@@ -2333,87 +2321,29 @@ class MusicService :
         mediaId: String,
         loudnessDb: Double?,
         perceptualLoudnessDb: Double?,
-        preserveCachedIfMissing: Boolean = false,
-    ) = runBlocking(Dispatchers.Main.immediate) {
-        val targetPlayer = playerProvider() ?: return@runBlocking
-        if (playerNormalizationProcessors[targetPlayer] !== processor ||
-            targetPlayer.currentMediaItem?.mediaId != mediaId
-        ) {
-            return@runBlocking
-        }
+    ) {
+        // Always record metadata, including for preloaded media items which
+        // are not yet the player's currentMediaItem. Never change the active
+        // processor just because a future song is being buffered.
+        trackLoudnessCache.record(mediaId, loudnessDb, perceptualLoudnessDb)
 
-        val isCurrentPlayer = ::player.isInitialized && targetPlayer === player
-        if (preserveCachedIfMissing &&
-            loudnessDb == null &&
-            perceptualLoudnessDb == null &&
-            isCurrentPlayer &&
-            cachedNormalizationMediaId == mediaId
-        ) {
-            return@runBlocking
-        }
-        if (isCurrentPlayer) {
-            loudnessSetupGeneration++
-            loudnessSetupJob?.cancel()
-            loudnessSetupJob = null
-        }
-        applyAudioNormalization(
-            processor = processor,
-            mediaId = mediaId,
-            loudnessDb = loudnessDb,
-            perceptualLoudnessDb = perceptualLoudnessDb,
-            updateCache = isCurrentPlayer,
-        )
-    }
-
-    private fun setupAudioNormalization() {
-        val requestGeneration = ++loudnessSetupGeneration
-        loudnessSetupJob?.cancel()
-
-        loudnessSetupJob = scope.launch {
-            try {
-                val currentMediaId = withContext(Dispatchers.Main) {
-                    player.currentMediaItem?.mediaId
-                }
-
-                val normalizeAudio = normalizationEnabledCached
-
-                if (normalizeAudio && currentMediaId != null) {
-                    val format = withContext(Dispatchers.IO) {
-                        database.format(currentMediaId).first()
-                    }
-
-                    Timber.tag(TAG).d("Audio normalization enabled: $normalizeAudio")
-
-                    withContext(Dispatchers.Main) {
-                        if (!isActive || requestGeneration != loudnessSetupGeneration) return@withContext
-                        if (player.currentMediaItem?.mediaId != currentMediaId) return@withContext
-
-                        val processor = playerNormalizationProcessors[player] ?: return@withContext
-                        if (format != null || cachedNormalizationMediaId != currentMediaId) {
-                            applyAudioNormalization(
-                                processor = processor,
-                                mediaId = currentMediaId,
-                                loudnessDb = format?.loudnessDb,
-                                perceptualLoudnessDb = format?.perceptualLoudnessDb,
-                                updateCache = true,
-                            )
-                        }
-                    }
-                } else {
-                    withContext(Dispatchers.Main) {
-                        if (!isActive || requestGeneration != loudnessSetupGeneration) return@withContext
-                        cachedNormalizationMediaId = null
-                        cachedNormalizationGainMb = null
-                        cachedNormalizationEnabled = false
-                        playerNormalizationProcessors.values.forEach { it.enabled = false }
-                    }
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                reportException(e)
-                playerNormalizationProcessors.values.forEach { it.enabled = false }
+        // The data-source resolver runs before it hands audio bytes to
+        // ExoPlayer. Apply a current track's gain synchronously here rather
+        // than scheduling a database-driven correction during playback.
+        runBlocking(Dispatchers.Main.immediate) {
+            val targetPlayer = playerProvider() ?: return@runBlocking
+            if (playerNormalizationProcessors[targetPlayer] !== processor ||
+                targetPlayer.currentMediaItem?.mediaId != mediaId
+            ) {
+                return@runBlocking
             }
+
+            val prepared = trackLoudnessCache.get(mediaId)
+            applyAudioNormalization(
+                processor = processor,
+                loudnessDb = prepared?.loudnessDb,
+                perceptualLoudnessDb = prepared?.perceptualLoudnessDb,
+            )
         }
     }
 
@@ -2445,10 +2375,6 @@ class MusicService :
 
     private fun closeAudioEffectSession(sessionIdOverride: Int? = null, clearNormalizationCache: Boolean = true) {
         val sessionIdToClose = sessionIdOverride ?: openedAudioEffectSessionId
-
-        loudnessSetupGeneration++
-        loudnessSetupJob?.cancel()
-        loudnessSetupJob = null
 
         // Guard: only release/reset state if closing the currently active session
         val isClosingCurrentSession =
@@ -2610,7 +2536,7 @@ class MusicService :
 
         lastPlaybackSpeed = -1.0f // force update song
 
-        setupAudioNormalization()
+        applyPreparedAudioNormalizationNow()
 
         scrobbleManager?.onSongStop()
         if (player.playWhenReady && player.playbackState == Player.STATE_READY) {
@@ -3852,7 +3778,6 @@ class MusicService :
                 mediaId = mediaId,
                 loudnessDb = storedFormat?.loudnessDb,
                 perceptualLoudnessDb = storedFormat?.perceptualLoudnessDb,
-                preserveCachedIfMissing = true,
             )
 
             val shouldBypassCache = bypassCacheForQualityChange.contains(mediaId)
