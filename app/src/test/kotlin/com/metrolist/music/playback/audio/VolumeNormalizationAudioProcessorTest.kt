@@ -166,6 +166,9 @@ class VolumeNormalizationAudioProcessorTest {
 
         // A selected track must use its prepared gain from its first frame.
         processor.setTargetGain(600, immediate = true)
+        // Simulate a redundant play/resume callback: it must not cancel the
+        // pending immediate gain before the audio thread sees the new track.
+        processor.setTargetGain(600)
         processor.queueInput(pcm16Buffer(frames = 1))
         val nextTrack = processor.output.order(ByteOrder.LITTLE_ENDIAN)
         val left = nextTrack.getShort().toInt()
