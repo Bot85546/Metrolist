@@ -50,7 +50,7 @@ class QualifiedPlaySortingTest {
                 liked = true, inLibrary = TODAY, isDownloaded = true, isUploaded = true, albumId = "unknown"),
             SongEntity(id = "zero", title = "Zero", duration = 300, totalPlayTime = 2_000_000,
                 liked = true, inLibrary = TODAY, isDownloaded = true, isUploaded = true, albumId = "zero"),
-        ).forEach(database.dao::insert)
+        ).forEach { database.dao.insert(it) }
 
         for (id in SONG_IDS) {
             database.dao.insert(ArtistEntity(id = id, name = id, isLocal = true, bookmarkedAt = TODAY))
