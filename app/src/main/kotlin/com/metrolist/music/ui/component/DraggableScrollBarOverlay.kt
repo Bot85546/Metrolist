@@ -8,7 +8,7 @@ package com.metrolist.music.ui.component
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.width
@@ -24,7 +24,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,8 +35,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
-import kotlin.math.abs
 import kotlin.math.max
 
 @Composable
@@ -55,7 +52,6 @@ fun DraggableScrollbar(
     headerItems: Int = 0
 ) {
     val density = LocalDensity.current
-    val coroutineScope = rememberCoroutineScope()
     var isDragging by remember { mutableStateOf(false) }
     var lastScrollTime by remember { mutableLongStateOf(0L) }
     var smoothedY by remember { mutableFloatStateOf(0f) }
@@ -86,7 +82,7 @@ fun DraggableScrollbar(
             .width(trackWidth)
             .fillMaxHeight()
             .pointerInput(scrollState) {
-                detectDragGestures(
+                detectVerticalDragGestures(
                     onDragStart = { offset ->
                         isDragging = true
                         lastTargetIndex = -1
@@ -94,6 +90,7 @@ fun DraggableScrollbar(
                         val constThumbHeight = with(density) { thumbHeight.toPx() }
                         val maxThumbY = viewportHeight - constThumbHeight
                         smoothedThumbY = (offset.y - constThumbHeight / 2).coerceIn(0f, maxThumbY)
+                        smoothedY = (offset.y / viewportHeight).coerceIn(0f, 1f)
                     },
                     onDragEnd = { 
                         isDragging = false
@@ -122,11 +119,11 @@ fun DraggableScrollbar(
                     
                     smoothedThumbY = smoothedThumbY * (1f - thumbSmoothingFactor) + targetThumbY * thumbSmoothingFactor
                     
-                    if (currentTime - lastScrollTime < 40) return@detectDragGestures
+                    if (currentTime - lastScrollTime < 40) return@detectVerticalDragGestures
                     lastScrollTime = currentTime
 
                     val visibleItems = layoutInfo.visibleItemsInfo
-                    if (visibleItems.isEmpty()) return@detectDragGestures
+                    if (visibleItems.isEmpty()) return@detectVerticalDragGestures
 
                     val maxScrollIndex = max(1, totalContentItems - visibleItems.size)
 
@@ -145,17 +142,9 @@ fun DraggableScrollbar(
                         val targetIndex = (headerItems + targetFractionalIndex.toInt())
                             .coerceIn(headerItems, layoutInfo.totalItemsCount - 1)
 
-                        if (abs(targetIndex - lastTargetIndex) >= 1) {
+                        if (targetIndex != lastTargetIndex) {
                             lastTargetIndex = targetIndex
-                            coroutineScope.launch {
-                                try {
-                                    scrollState.animateScrollToItem(
-                                        index = targetIndex,
-                                        scrollOffset = 0
-                                    )
-                                } catch (e: Exception) {
-                                }
-                            }
+                            scrollState.requestScrollToItem(targetIndex)
                         }
                     }
                 }
