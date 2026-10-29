@@ -15,6 +15,7 @@ import com.metrolist.innertube.models.SongItem
 import com.metrolist.music.db.entities.Song
 import com.metrolist.music.models.MediaMetadata
 import com.metrolist.music.models.toMediaMetadata
+import com.metrolist.music.ui.utils.resize
 import com.metrolist.music.utils.ArtistNameAliases
 
 val MediaItem.metadata: MediaMetadata?
@@ -25,7 +26,7 @@ fun Song.toMediaItem() = toMediaMetadata().toMediaItem()
 fun SongItem.toMediaItem() = toMediaMetadata().toMediaItem()
 
 fun MediaMetadata.toMediaItem(): MediaItem {
-    val resolvedMetadata = withResolvedArtistNameAliases()
+    val resolvedMetadata = withResolvedArtistNameAliases().withHighResolutionArtwork()
     val artistNames = resolvedMetadata.artists.joinToString { it.name }
     return MediaItem.Builder()
         .setMediaId(resolvedMetadata.id)
@@ -60,8 +61,13 @@ fun MediaMetadata.withResolvedArtistNameAliases(): MediaMetadata {
     return if (resolvedArtists == artists) this else copy(artists = resolvedArtists)
 }
 
+private fun MediaMetadata.withHighResolutionArtwork(): MediaMetadata {
+    val highResolutionUrl = thumbnailUrl?.resize(1080, 1080)
+    return if (highResolutionUrl == thumbnailUrl) this else copy(thumbnailUrl = highResolutionUrl)
+}
+
 fun MediaItem.withUpdatedMetadata(updatedMetadata: MediaMetadata): MediaItem {
-    val resolvedMetadata = updatedMetadata.withResolvedArtistNameAliases()
+    val resolvedMetadata = updatedMetadata.withResolvedArtistNameAliases().withHighResolutionArtwork()
     val artistNames = resolvedMetadata.artists.joinToString { it.name }
     return buildUpon()
         .setTag(resolvedMetadata)

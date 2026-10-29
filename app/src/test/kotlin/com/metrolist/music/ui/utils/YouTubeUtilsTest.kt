@@ -26,6 +26,24 @@ class YouTubeUtilsTest {
     }
 
     @Test
+    fun `googleusercontent square thumbnail is upgraded without dropping query parameters`() {
+        val url = "https://yt3.googleusercontent.com/cover=s60-c-k-no-rj?token=a=b"
+        assertEquals(
+            "https://yt3.googleusercontent.com/cover=w1080-h1080-p-l90-rj?token=a=b",
+            url.resize(1080, 1080),
+        )
+    }
+
+    @Test
+    fun `googleusercontent square thumbnail supports a single target dimension`() {
+        val url = "https://lh3.googleusercontent.com/cover=s96"
+        assertEquals(
+            "https://lh3.googleusercontent.com/cover=w300-h300-p-l90-rj",
+            url.resize(width = 300),
+        )
+    }
+
+    @Test
     fun `i_ytimg url keeps the thumbnail variant provided by YouTube`() {
         // maxresdefault is optional and returns 404 for videos that do not publish one.
         val url = "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg?sqp=-oaymwE"
