@@ -4026,7 +4026,10 @@ class MusicService :
             enableAudioTrackPlaybackParams: Boolean,
         ) = DefaultAudioSink
             .Builder(this@MusicService)
-            .setEnableFloatOutput(enableFloatOutput)
+            // Media3 bypasses custom AudioProcessorChain processing on its
+            // direct float-output path. All audio must pass through the PCM
+            // chain for normalization to be consistently applied.
+            .setEnableFloatOutput(false)
             .setEnableAudioTrackPlaybackParams(useAudioTrackPlaybackParams)
             .setAudioProcessorChain(
                 DefaultAudioSink.DefaultAudioProcessorChain(
