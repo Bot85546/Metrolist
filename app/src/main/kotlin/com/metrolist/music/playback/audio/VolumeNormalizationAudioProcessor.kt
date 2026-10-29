@@ -61,6 +61,8 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
             // Bypass per-sample decoding when normalization does no work.
             // Copy raw PCM bytes unchanged, preserving every bit of the input.
             val output = replaceOutputBuffer(inputBuffer.remaining())
+            inputBuffer.order(ByteOrder.LITTLE_ENDIAN)
+            output.order(ByteOrder.LITTLE_ENDIAN)
             output.put(inputBuffer)
             output.flip()
             return
