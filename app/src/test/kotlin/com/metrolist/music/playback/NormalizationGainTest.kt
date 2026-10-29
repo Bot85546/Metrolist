@@ -11,13 +11,27 @@ class NormalizationGainTest {
     }
 
     @Test
-    fun `legacy loudness uses YouTube reference level`() {
-        assertEquals(-506, normalizationGainMb(-1.94, null, -14f))
+    fun `relative loudness requires a calibrated client reference`() {
+        assertNull(normalizationGainMb(-1.94, null, -14f))
+        assertEquals(-506, normalizationGainMb(-1.94, null, -14f, -7.0))
+    }
+
+    @Test
+    fun `different YouTube client references give the same absolute loudness`() {
+        val absolute = -12.44
+        assertEquals(
+            normalizationGainMb(null, absolute, -14f),
+            normalizationGainMb(-5.44, null, -14f, -7.0),
+        )
+        assertEquals(
+            normalizationGainMb(null, absolute, -14f),
+            normalizationGainMb(1.56, null, -14f, -14.0),
+        )
     }
 
     @Test
     fun `gain is clamped to processor limits`() {
-        assertEquals(1200, normalizationGainMb(-30.0, null, -14f))
+        assertEquals(1200, normalizationGainMb(-30.0, null, -14f, -7.0))
         assertEquals(-2400, normalizationGainMb(null, 10.0, -14f))
     }
 
@@ -72,7 +86,7 @@ class NormalizationGainTest {
         val relative = -5.44
         assertEquals(
             normalizationGainMb(null, measured, -14f),
-            normalizationGainMb(relative, null, -14f),
+            normalizationGainMb(relative, null, -14f, -7.0),
         )
     }
 
@@ -85,23 +99,30 @@ class NormalizationGainTest {
     @Test
     fun `gain conversion rounds floating point metadata consistently`() {
         assertEquals(-156, normalizationGainMb(null, -12.44, -14f))
-        assertEquals(-156, normalizationGainMb(-5.4399996, null, -14f))
+        assertEquals(-156, normalizationGainMb(-5.4399996, null, -14f, -7.0))
         for (hundredths in -3000..0) {
             val measured = hundredths / 100.0
             assertEquals(
                 normalizationGainMb(null, measured, -14f),
-                normalizationGainMb(measured + 7.0, null, -14f),
+                normalizationGainMb(measured + 7.0, null, -14f, -7.0),
             )
         }
     }
 
     @Test
     fun `invalid metadata falls back without corrupting gain`() {
-        assertEquals(-700, normalizationGainMb(0.0, Double.NaN, -14f))
+        assertEquals(-700, normalizationGainMb(0.0, Double.NaN, -14f, -7.0))
         assertNull(normalizationGainMb(Double.POSITIVE_INFINITY, Double.NaN, -14f))
         assertNull(normalizationGainMb(null, -10.0, Float.NaN))
         assertEquals(-3000, normalizationGainMb(null, Double.MAX_VALUE, -14f))
         assertEquals(1200, normalizationGainMb(null, -Double.MAX_VALUE, -14f))
+    }
+
+    @Test
+    fun `unanchored relative metadata never invents an absolute LUFS measurement`() {
+        assertNull(normalizationGainMb(0.0, null, -14f))
+        assertNull(normalizationGainMb(10.0, Double.NaN, -14f))
+        assertNull(normalizationGainMb(0.0, null, -14f, Double.NaN))
     }
 
     @Test
