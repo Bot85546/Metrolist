@@ -7,6 +7,7 @@ package com.metrolist.music.playback
 internal data class TrackLoudness(
     val loudnessDb: Double?,
     val perceptualLoudnessDb: Double?,
+    val clientName: String? = null,
 )
 
 /**
@@ -25,20 +26,62 @@ internal class TrackLoudnessCache(private val capacity: Int = 64) {
             size > capacity
     }
 
+    // YouTube's relative loudness is referenced to a *client-specific* target.
+    // Observed responses can use -7 or -14 LUFS; a hard-coded -7 is wrong for
+    // some streams. Learn a reference only from responses containing BOTH values.
+    // The list of extraction clients is small, so eight entries is sufficient.
+    private val clientReferences = object : LinkedHashMap<String, Double>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Double>?): Boolean =
+            size > 8
+    }
+    private val conflictingClients = mutableSetOf<String>()
+
     @Synchronized
-    fun record(mediaId: String, loudnessDb: Double?, perceptualLoudnessDb: Double?) {
+    fun record(
+        mediaId: String,
+        loudnessDb: Double?,
+        perceptualLoudnessDb: Double?,
+        clientName: String? = null,
+    ) {
         val relative = loudnessDb?.takeIf { it.isFinite() }
         val absolute = perceptualLoudnessDb?.takeIf { it.isFinite() }
         if (relative == null && absolute == null) return
+
+        if (!clientName.isNullOrBlank() && relative != null && absolute != null &&
+            clientName !in conflictingClients
+        ) {
+            val referenceLufs = absolute - relative
+            if (referenceLufs in -30.0..0.0) {
+                val previousReference = clientReferences[clientName]
+                when {
+                    previousReference == null -> clientReferences[clientName] = referenceLufs
+                    kotlin.math.abs(previousReference - referenceLufs) > 0.5 -> {
+                        // If one client reports multiple reference scales, relative-only
+                        // metadata from it cannot be interpreted safely.
+                        clientReferences.remove(clientName)
+                        conflictingClients.add(clientName)
+                    }
+                }
+            }
+        }
+
         val previous = entries[mediaId]
-        // A partial response must not downgrade a known absolute measurement
-        // to a client-dependent relative measurement.
+        // Partial responses must not discard a known absolute measurement.
         entries[mediaId] = TrackLoudness(
             relative ?: previous?.loudnessDb,
             absolute ?: previous?.perceptualLoudnessDb,
+            clientName ?: previous?.clientName,
         )
     }
 
     @Synchronized
     fun get(mediaId: String): TrackLoudness? = entries[mediaId]
+
+    /** A reference is usable only when learned for this exact extraction client. */
+    @Synchronized
+    fun referenceFor(mediaId: String): Double? {
+        val entry = entries[mediaId] ?: return null
+        if (entry.perceptualLoudnessDb != null) return null
+        return entry.clientName?.let(clientReferences::get)
+    }
 }
