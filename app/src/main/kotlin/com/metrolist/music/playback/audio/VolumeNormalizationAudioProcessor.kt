@@ -48,7 +48,10 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
      */
     @Synchronized
     fun setTargetGain(gainMb: Int, immediate: Boolean = false) {
-        if (currentGain.targetGainMb != gainMb || currentGain.immediate != immediate) {
+        // Keep a pending immediate track-boundary request intact if another
+        // callback redundantly reapplies the same gain without that flag.
+        // Only a genuinely different gain can replace it with a ramp request.
+        if (currentGain.targetGainMb != gainMb || (immediate && !currentGain.immediate)) {
             val linearGain = 10.0.pow(gainMb / 2000.0)
             currentGain = GainState(gainMb, linearGain, immediate)
             Timber.tag(TAG).d("Target gain set to $gainMb mB (Linear multiplier: $linearGain, immediate=$immediate)")
