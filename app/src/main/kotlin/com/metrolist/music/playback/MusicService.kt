@@ -2342,11 +2342,12 @@ class MusicService :
         mediaId: String,
         loudnessDb: Double?,
         perceptualLoudnessDb: Double?,
+        clientName: String? = null,
     ) {
         // Always record metadata, including for preloaded media items which
         // are not yet the player's currentMediaItem. Never change the active
         // processor just because a future song is being buffered.
-        trackLoudnessCache.record(mediaId, loudnessDb, perceptualLoudnessDb)
+        trackLoudnessCache.record(mediaId, loudnessDb, perceptualLoudnessDb, clientName)
         // Missing metadata does not justify a main-thread round trip. If a
         // stream response contains usable measurements, this method is called
         // again before the newly resolved stream is handed to the player.
