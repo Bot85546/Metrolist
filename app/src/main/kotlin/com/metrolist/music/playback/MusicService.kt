@@ -914,11 +914,13 @@ class MusicService :
             }
 
         combine(
-            dataStore.data.map { it[AudioOffload] ?: false },
-            dataStore.data.map { it[CrossfadeEnabledKey] ?: false },
-        ) { offloadPref, crossfadeEnabled ->
-            // Force disable offload if crossfade is enabled to prevent volume ramp issues
-            if (crossfadeEnabled) false else offloadPref
+            dataStore.data.map { it[AudioOffload] ?: false }.distinctUntilChanged(),
+            dataStore.data.map { it[CrossfadeEnabledKey] ?: false }.distinctUntilChanged(),
+            dataStore.data.map { it[AudioNormalizationKey] ?: true }.distinctUntilChanged(),
+        ) { offloadPref, crossfadeEnabled, normalizeAudio ->
+            // Audio offload bypasses Media3's PCM AudioProcessorChain. Never
+            // let a supported codec silently skip our normalization gain.
+            shouldEnableAudioOffload(offloadPref, crossfadeEnabled, normalizeAudio)
         }.distinctUntilChanged()
             .collectLatest(scope) { useOffload ->
                 player.setOffloadEnabled(useOffload)
@@ -1334,17 +1336,16 @@ class MusicService :
         if (prefs != null) {
             val offload = prefs[AudioOffload] ?: false
             val crossfade = prefs[CrossfadeEnabledKey] ?: false
-            player.setOffloadEnabled(if (crossfade) false else offload)
+            val normalizeAudio = prefs[AudioNormalizationKey] ?: true
+            player.setOffloadEnabled(shouldEnableAudioOffload(offload, crossfade, normalizeAudio))
             player.skipSilenceEnabled = prefs[SkipSilenceKey] ?: false
         } else {
-            player.apply {
-                runBlocking {
-                    val offload = dataStore.get(AudioOffload, false)
-                    val crossfade = dataStore.get(CrossfadeEnabledKey, false)
-                    setOffloadEnabled(if (crossfade) false else offload)
-                    skipSilenceEnabled = dataStore.get(SkipSilenceKey, false)
-                }
-            }
+            val currentPrefs = runBlocking(Dispatchers.IO) { dataStore.data.first() }
+            val offload = currentPrefs[AudioOffload] ?: false
+            val crossfade = currentPrefs[CrossfadeEnabledKey] ?: false
+            val normalizeAudio = currentPrefs[AudioNormalizationKey] ?: true
+            player.setOffloadEnabled(shouldEnableAudioOffload(offload, crossfade, normalizeAudio))
+            player.skipSilenceEnabled = currentPrefs[SkipSilenceKey] ?: false
         }
         val historyReporter = YouTubeHistoryReporter(
             player = player,
@@ -5132,3 +5133,15 @@ internal fun normalizationGainMb(
         // limit. The PCM processor still clips peaks, so this is not a limiter.
         ?.coerceIn(-1500, 600)
 }
+
+/**
+ * Offload plays encoded audio directly and bypasses the Media3 PCM
+ * AudioProcessorChain (normalization, equalizer and silence detection).
+ * Per-track gain must never silently disappear on offload-capable formats.
+ * Preserve opt-in offload only when normalization and crossfade are both off.
+ */
+internal fun shouldEnableAudioOffload(
+    offloadPreferred: Boolean,
+    crossfadeEnabled: Boolean,
+    normalizationEnabled: Boolean,
+): Boolean = offloadPreferred && !crossfadeEnabled && !normalizationEnabled
