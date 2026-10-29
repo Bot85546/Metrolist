@@ -39,7 +39,8 @@ class VolumeNormalizationAudioProcessorTest {
         }
         processor.queueInput(original)
 
-        assertArrayEquals(bytes, ByteArray(processor.output.remaining()).also(processor.output::get))
+        val output = processor.output
+        assertArrayEquals(bytes, ByteArray(output.remaining()).also(output::get))
     }
 
     @Test
@@ -68,7 +69,7 @@ class VolumeNormalizationAudioProcessorTest {
             .order(ByteOrder.LITTLE_ENDIAN)
             .apply {
                 shortArrayOf(0, 1, -1, 10_000, -10_000, Short.MIN_VALUE)
-                    .forEach(::putShort)
+                    .forEach { putShort(it) }
                 flip()
             }
 }
