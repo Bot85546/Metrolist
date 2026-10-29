@@ -7,6 +7,8 @@ import androidx.media3.common.util.UnstableApi
 import timber.log.Timber
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.abs
+import kotlin.math.min
 import kotlin.math.pow
 
 @UnstableApi
@@ -15,15 +17,6 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
     private var bytesPerSample = 0
     private var sampleRate = 0
     private var channelCount = 0
-
-    // This state is owned by the audio-processing thread. Changing the desired
-    // gain does not allocate buffers or schedule work on another thread.
-    private var hasProcessedAudio = false
-    private var lastTargetGainMb = Int.MIN_VALUE
-    private var renderedLinearGain = 1.0
-    private var rampTargetLinearGain = 1.0
-    private var rampStepPerFrame = 0.0
-    private var rampFramesRemaining = 0
 
     @Volatile
     var enabled = false
@@ -34,17 +27,34 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
             }
         }
 
-    private data class GainState(val targetGainMb: Int, val linearGain: Double)
+    private data class GainState(
+        val targetGainMb: Int,
+        val linearGain: Double,
+        val smooth: Boolean,
+    )
 
+    // Control-thread writes are read once per PCM buffer. The ramp state is
+    // exclusively owned by the audio thread: no locks or timers on that path.
     @Volatile
-    private var currentGain = GainState(0, 1.0)
+    private var currentGain = GainState(0, 1.0, false)
+    private var appliedGainState: GainState? = null
+    private var appliedLinearGain = 1.0
+    private var rampRemainingFrames = 0
+    private var rampStepPerFrame = 0.0
+    private var hasProcessedAudio = false
 
+    /**
+     * A prepared track must use its correct gain from the first sample
+     * (smooth=false). Only corrections made to audible playback request a
+     * short fade (smooth=true). No audio is buffered or delayed.
+     */
     @Synchronized
-    fun setTargetGain(gainMb: Int) {
-        if (currentGain.targetGainMb != gainMb) {
+    fun setTargetGain(gainMb: Int, smooth: Boolean = false) {
+        val previous = currentGain
+        if (previous.targetGainMb != gainMb || previous.smooth != smooth) {
             val linearGain = 10.0.pow(gainMb / 2000.0)
-            currentGain = GainState(gainMb, linearGain)
-            Timber.tag(TAG).d("Target gain set to $gainMb mB (Linear multiplier: $linearGain)")
+            currentGain = GainState(gainMb, linearGain, smooth)
+            Timber.tag(TAG).d("Target gain set to $gainMb mB (Linear multiplier: $linearGain, smooth=$smooth)")
         }
     }
 
@@ -61,173 +71,139 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
             }
 
         Timber.tag(TAG).d(
-            "Configured: sampleRate=${inputAudioFormat.sampleRate}, channels=${inputAudioFormat.channelCount}, encoding=$encoding",
+            "Configured: sampleRate=$sampleRate, channels=$channelCount, encoding=$encoding",
         )
         return inputAudioFormat
-    }
-
-    override fun onFlush() {
-        // Audio after a flush should start at the selected gain, not ramp up
-        // from the previous song's gain. This is also the initial state.
-        hasProcessedAudio = false
-        lastTargetGainMb = Int.MIN_VALUE
-        rampFramesRemaining = 0
-        renderedLinearGain = 1.0
-        rampTargetLinearGain = 1.0
-        rampStepPerFrame = 0.0
-    }
-
-    private fun updateRampTarget(targetGainMb: Int, targetLinearGain: Double) {
-        if (!hasProcessedAudio) {
-            // A new stream's very first sample is already normalized.
-            // Never impose a fade-in or an additional startup delay.
-            renderedLinearGain = targetLinearGain
-            rampTargetLinearGain = targetLinearGain
-            rampFramesRemaining = 0
-            rampStepPerFrame = 0.0
-            lastTargetGainMb = targetGainMb
-            return
-        }
-        if (lastTargetGainMb == targetGainMb) return
-
-        // Only mid-stream gain changes are smoothed. At 48 kHz this is
-        // 2,880 frames (60 ms), and no audio is buffered or delayed.
-        val frames = (sampleRate.toLong() * RAMP_DURATION_MS / 1_000L).coerceAtLeast(1L).toInt()
-        rampTargetLinearGain = targetLinearGain
-        rampFramesRemaining = frames
-        rampStepPerFrame = (targetLinearGain - renderedLinearGain) / frames
-        lastTargetGainMb = targetGainMb
-    }
-
-    private fun nextFrameGain(): Double {
-        if (rampFramesRemaining > 0) {
-            renderedLinearGain += rampStepPerFrame
-            rampFramesRemaining--
-            if (rampFramesRemaining == 0) {
-                // Avoid accumulating rounding error across consecutive ramps.
-                renderedLinearGain = rampTargetLinearGain
-            }
-        }
-        return renderedLinearGain
     }
 
     override fun queueInput(inputBuffer: ByteBuffer) {
         if (!inputBuffer.hasRemaining()) return
 
-        val gain = currentGain
-        val targetGainMb = if (enabled) gain.targetGainMb else 0
-        val targetLinearGain = if (enabled) gain.linearGain else 1.0
-        updateRampTarget(targetGainMb, targetLinearGain)
-
-        // AudioProcessor input buffers contain complete interleaved frames.
-        val frameBytes = bytesPerSample * channelCount
-        val sampleCount = inputBuffer.remaining() / bytesPerSample
-        val frameCount = inputBuffer.remaining() / frameBytes
-        val ramping = rampFramesRemaining > 0
-
-        if (!ramping && targetGainMb == 0) {
-            // Once the ramp is finished, unity gain is a bit-exact PCM copy.
-            // No per-sample decoding, multiplications or extra allocations.
-            val output = replaceOutputBuffer(inputBuffer.remaining())
-            inputBuffer.order(ByteOrder.LITTLE_ENDIAN)
-            output.order(ByteOrder.LITTLE_ENDIAN)
-            output.put(inputBuffer)
-            output.flip()
+        val requested = currentGain
+        if (!enabled) {
+            // Preserve the bit-exact pass-through path when disabled.
+            appliedGainState = null
+            appliedLinearGain = 1.0
+            rampRemainingFrames = 0
             hasProcessedAudio = true
+            outputUnmodified(inputBuffer)
             return
         }
 
+        if (requested !== appliedGainState) {
+            if (requested.smooth &&
+                hasProcessedAudio &&
+                sampleRate > 0 &&
+                channelCount > 0 &&
+                abs(requested.linearGain - appliedLinearGain) > 1e-9
+            ) {
+                rampRemainingFrames = (sampleRate * RAMP_DURATION_MS / 1000).coerceAtLeast(1)
+                rampStepPerFrame = (requested.linearGain - appliedLinearGain) / rampRemainingFrames
+            } else {
+                // Track changes and the first audio buffer never fade in from
+                // the previous song's gain.
+                appliedLinearGain = requested.linearGain
+                rampRemainingFrames = 0
+            }
+            appliedGainState = requested
+        }
+        hasProcessedAudio = true
+
+        if (rampRemainingFrames == 0 && requested.targetGainMb == 0) {
+            outputUnmodified(inputBuffer)
+            return
+        }
+
+        val sampleCount = inputBuffer.remaining() / bytesPerSample
         val output = replaceOutputBuffer(sampleCount * bytesPerSample)
         inputBuffer.order(ByteOrder.LITTLE_ENDIAN)
         output.order(ByteOrder.LITTLE_ENDIAN)
 
-        if (!ramping) {
-            // The normal playback path retains one multiplier per buffer.
-            // The per-frame ramp runs only for ~60 ms following an update.
-            val linearGain = targetLinearGain
-            when (encoding) {
-                C.ENCODING_PCM_16BIT ->
-                    repeat(sampleCount) {
-                        val sample = inputBuffer.getShort()
-                        output.putShort(
-                            (sample * linearGain).coerceIn(-32768.0, 32767.0).toInt().toShort(),
-                        )
-                    }
-                C.ENCODING_PCM_24BIT ->
-                    repeat(sampleCount) {
-                        val b0 = inputBuffer.get().toInt() and 0xFF
-                        val b1 = inputBuffer.get().toInt() and 0xFF
-                        val b2 = inputBuffer.get().toInt()
-                        val sample = (b2 shl 16) or (b1 shl 8) or b0
-                        val processed = (sample * linearGain).coerceIn(-8388608.0, 8388607.0).toInt()
-                        output.put((processed and 0xFF).toByte())
-                        output.put(((processed shr 8) and 0xFF).toByte())
-                        output.put(((processed shr 16) and 0xFF).toByte())
-                    }
-                C.ENCODING_PCM_32BIT ->
-                    repeat(sampleCount) {
-                        val sample = inputBuffer.getInt()
-                        output.putInt(
-                            (sample * linearGain).coerceIn(-2147483648.0, 2147483647.0).toLong().toInt(),
-                        )
-                    }
-                C.ENCODING_PCM_FLOAT -> {
-                    val floatGain = linearGain.toFloat()
-                    repeat(sampleCount) {
-                        val sample = inputBuffer.getFloat()
-                        output.putFloat((sample * floatGain).coerceIn(-1.0f, 1.0f))
-                    }
+        // The ordinary case uses one constant gain for the whole buffer.
+        // Only the first 50 ms after a late correction takes the per-frame
+        // path. All channels in one audio frame use the same multiplier.
+        val rampFrames = if (channelCount > 0) min(rampRemainingFrames, sampleCount / channelCount) else 0
+        repeat(rampFrames) {
+            appliedLinearGain += rampStepPerFrame
+            rampRemainingFrames--
+            if (rampRemainingFrames == 0) {
+                appliedLinearGain = requested.linearGain
+            }
+            writeProcessedSamples(inputBuffer, output, channelCount, appliedLinearGain)
+        }
+        writeProcessedSamples(inputBuffer, output, sampleCount - rampFrames * channelCount, appliedLinearGain)
+        output.flip()
+    }
+
+    private fun outputUnmodified(inputBuffer: ByteBuffer) {
+        val output = replaceOutputBuffer(inputBuffer.remaining())
+        inputBuffer.order(ByteOrder.LITTLE_ENDIAN)
+        output.order(ByteOrder.LITTLE_ENDIAN)
+        output.put(inputBuffer)
+        output.flip()
+    }
+
+    private fun writeProcessedSamples(
+        inputBuffer: ByteBuffer,
+        output: ByteBuffer,
+        sampleCount: Int,
+        linearGain: Double,
+    ) {
+        when (encoding) {
+            C.ENCODING_PCM_16BIT ->
+                repeat(sampleCount) {
+                    val sample = inputBuffer.getShort()
+                    output.putShort(
+                        (sample * linearGain)
+                            .coerceIn(-32768.0, 32767.0)
+                            .toInt()
+                            .toShort(),
+                    )
+                }
+
+            C.ENCODING_PCM_24BIT ->
+                repeat(sampleCount) {
+                    val b0 = inputBuffer.get().toInt() and 0xFF
+                    val b1 = inputBuffer.get().toInt() and 0xFF
+                    val b2 = inputBuffer.get().toInt()
+                    val sample = (b2 shl 16) or (b1 shl 8) or b0
+                    val processed =
+                        (sample * linearGain)
+                            .coerceIn(-8388608.0, 8388607.0)
+                            .toInt()
+                    output.put((processed and 0xFF).toByte())
+                    output.put(((processed shr 8) and 0xFF).toByte())
+                    output.put(((processed shr 16) and 0xFF).toByte())
+                }
+
+            C.ENCODING_PCM_32BIT ->
+                repeat(sampleCount) {
+                    val sample = inputBuffer.getInt()
+                    output.putInt(
+                        (sample * linearGain)
+                            .coerceIn(-2147483648.0, 2147483647.0)
+                            .toLong()
+                            .toInt(),
+                    )
+                }
+
+            C.ENCODING_PCM_FLOAT -> {
+                val floatGain = linearGain.toFloat()
+                repeat(sampleCount) {
+                    val sample = inputBuffer.getFloat()
+                    output.putFloat((sample * floatGain).coerceIn(-1.0f, 1.0f))
                 }
             }
-        } else {
-            when (encoding) {
-                C.ENCODING_PCM_16BIT ->
-                    repeat(frameCount) {
-                        val linearGain = nextFrameGain()
-                        repeat(channelCount) {
-                            val sample = inputBuffer.getShort()
-                            output.putShort(
-                                (sample * linearGain).coerceIn(-32768.0, 32767.0).toInt().toShort(),
-                            )
-                        }
-                    }
-                C.ENCODING_PCM_24BIT ->
-                    repeat(frameCount) {
-                        val linearGain = nextFrameGain()
-                        repeat(channelCount) {
-                            val b0 = inputBuffer.get().toInt() and 0xFF
-                            val b1 = inputBuffer.get().toInt() and 0xFF
-                            val b2 = inputBuffer.get().toInt()
-                            val sample = (b2 shl 16) or (b1 shl 8) or b0
-                            val processed = (sample * linearGain).coerceIn(-8388608.0, 8388607.0).toInt()
-                            output.put((processed and 0xFF).toByte())
-                            output.put(((processed shr 8) and 0xFF).toByte())
-                            output.put(((processed shr 16) and 0xFF).toByte())
-                        }
-                    }
-                C.ENCODING_PCM_32BIT ->
-                    repeat(frameCount) {
-                        val linearGain = nextFrameGain()
-                        repeat(channelCount) {
-                            val sample = inputBuffer.getInt()
-                            output.putInt(
-                                (sample * linearGain).coerceIn(-2147483648.0, 2147483647.0).toLong().toInt(),
-                            )
-                        }
-                    }
-                C.ENCODING_PCM_FLOAT ->
-                    repeat(frameCount) {
-                        val floatGain = nextFrameGain().toFloat()
-                        repeat(channelCount) {
-                            val sample = inputBuffer.getFloat()
-                            output.putFloat((sample * floatGain).coerceIn(-1.0f, 1.0f))
-                        }
-                    }
-            }
         }
+    }
 
-        output.flip()
-        hasProcessedAudio = true
+    override fun onFlush() {
+        // Seek/reconfiguration/new track: never continue the prior ramp.
+        appliedLinearGain = if (enabled) currentGain.linearGain else 1.0
+        appliedGainState = if (enabled) currentGain else null
+        rampRemainingFrames = 0
+        rampStepPerFrame = 0.0
+        hasProcessedAudio = false
     }
 
     override fun onReset() {
@@ -235,16 +211,15 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
         bytesPerSample = 0
         sampleRate = 0
         channelCount = 0
-        hasProcessedAudio = false
-        lastTargetGainMb = Int.MIN_VALUE
-        rampFramesRemaining = 0
-        renderedLinearGain = 1.0
-        rampTargetLinearGain = 1.0
+        appliedGainState = null
+        appliedLinearGain = 1.0
+        rampRemainingFrames = 0
         rampStepPerFrame = 0.0
+        hasProcessedAudio = false
     }
 
     private companion object {
         const val TAG = "VolumeNormalizationProcessor"
-        const val RAMP_DURATION_MS = 60L
+        const val RAMP_DURATION_MS = 50
     }
 }
