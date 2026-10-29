@@ -204,7 +204,7 @@ fun LibraryAlbumsScreen(
                         AlbumSortType.YEAR -> R.string.sort_by_year
                         AlbumSortType.SONG_COUNT -> R.string.sort_by_song_count
                         AlbumSortType.LENGTH -> R.string.sort_by_length
-                        AlbumSortType.PLAY_TIME -> R.string.sort_by_play_time
+                        AlbumSortType.PLAY_TIME -> R.string.sort_by_times_played
                     }
                 },
             )

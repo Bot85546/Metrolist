@@ -392,7 +392,7 @@ fun LibrarySongsScreen(
                                 SongSortType.CREATE_DATE -> R.string.sort_by_create_date
                                 SongSortType.NAME -> R.string.sort_by_name
                                 SongSortType.ARTIST -> R.string.sort_by_artist
-                                SongSortType.PLAY_TIME -> R.string.sort_by_play_time
+                                SongSortType.PLAY_TIME -> R.string.sort_by_times_played
                             }
                         },
                     )

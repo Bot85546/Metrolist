@@ -66,6 +66,60 @@ import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.util.Locale
 
+
+private const val QUALIFIED_PLAY_COUNTS = """
+    SELECT e.songId, COUNT(*) AS qualifiedPlays, SUM(e.playTime) AS qualifiedPlayTime
+    FROM event e
+    JOIN song counted_song ON counted_song.id = e.songId
+    WHERE (counted_song.duration > 0 AND e.playTime > counted_song.duration * 700)
+       OR (counted_song.duration <= 0 AND e.playTime >= 30000)
+    GROUP BY e.songId
+"""
+
+private const val SONG_PLAY_COUNT_SELECT =
+    "SELECT song.* FROM song LEFT JOIN (" + QUALIFIED_PLAY_COUNTS +
+        ") play_counts ON play_counts.songId = song.id "
+
+private const val PLAY_COUNT_ORDER =
+    " ORDER BY COALESCE(play_counts.qualifiedPlays, 0), " +
+        "COALESCE(play_counts.qualifiedPlayTime, 0), song.id"
+
+private const val ARTIST_PLAY_COUNT_JOIN = """
+    LEFT JOIN (
+        SELECT sam.artistId,
+               SUM(qualified.qualifiedPlays) AS qualifiedPlays,
+               SUM(qualified.qualifiedPlayTime) AS qualifiedPlayTime
+        FROM song_artist_map sam
+        JOIN (
+""" + QUALIFIED_PLAY_COUNTS + """
+        ) qualified ON qualified.songId = sam.songId
+        GROUP BY sam.artistId
+    ) play_counts ON play_counts.artistId = artist.id
+"""
+
+private const val ALBUM_PLAY_COUNT_JOIN = """
+    LEFT JOIN (
+        SELECT songs.albumId,
+               SUM(qualified.qualifiedPlays) AS qualifiedPlays,
+               SUM(qualified.qualifiedPlayTime) AS qualifiedPlayTime
+        FROM song songs
+        JOIN (
+""" + QUALIFIED_PLAY_COUNTS + """
+        ) qualified ON qualified.songId = songs.id
+        GROUP BY songs.albumId
+    ) play_counts ON play_counts.albumId = album.id
+"""
+
+private const val GROUP_PLAY_COUNT_ORDER =
+    " ORDER BY COALESCE(play_counts.qualifiedPlays, 0), " +
+        "COALESCE(play_counts.qualifiedPlayTime, 0), "
+
+private const val ARTIST_LIBRARY_SONG_COUNT = """
+    (SELECT COUNT(*) FROM song_artist_map sam
+     JOIN song s ON sam.songId = s.id
+     WHERE sam.artistId = artist.id AND s.inLibrary IS NOT NULL) AS songCount
+"""
+
 /**
  * Helloo! Note from a dev:
  * SQL Injection Prevention:
@@ -150,7 +204,7 @@ interface DatabaseDao {
     fun songsByNameAsc(): Flow<List<Song>>
 
     @Transaction
-    @Query("SELECT * FROM song WHERE inLibrary IS NOT NULL ORDER BY totalPlayTime")
+    @Query(SONG_PLAY_COUNT_SELECT + "WHERE song.inLibrary IS NOT NULL" + PLAY_COUNT_ORDER)
     fun songsByPlayTimeAsc(): Flow<List<Song>>
 
 
@@ -205,7 +259,7 @@ interface DatabaseDao {
     fun likedSongsByNameAsc(): Flow<List<Song>>
 
     @Transaction
-    @Query("SELECT * FROM song WHERE liked ORDER BY totalPlayTime")
+    @Query(SONG_PLAY_COUNT_SELECT + "WHERE song.liked" + PLAY_COUNT_ORDER)
     fun likedSongsByPlayTimeAsc(): Flow<List<Song>>
 
     fun likedSongs(
@@ -264,6 +318,18 @@ interface DatabaseDao {
 
     @Transaction
     @Query(
+        "SELECT playlist_song_map.* FROM playlist_song_map " +
+            "LEFT JOIN (" + QUALIFIED_PLAY_COUNTS +
+            ") play_counts ON play_counts.songId = playlist_song_map.songId " +
+            "WHERE playlist_song_map.playlistId = :playlistId " +
+            "ORDER BY COALESCE(play_counts.qualifiedPlays, 0), " +
+            "COALESCE(play_counts.qualifiedPlayTime, 0), " +
+            "playlist_song_map.position, playlist_song_map.id"
+    )
+    fun playlistSongsByPlayCountAsc(playlistId: String): Flow<List<PlaylistSong>>
+
+    @Transaction
+    @Query(
         "SELECT * FROM playlist_song_map WHERE playlistId = :playlistId " +
             "ORDER BY position, id LIMIT :limit OFFSET :offset",
     )
@@ -303,7 +369,10 @@ interface DatabaseDao {
 
     @Transaction
     @Query(
-        "SELECT song.* FROM song_artist_map JOIN song ON song_artist_map.songId = song.id WHERE artistId = :artistId AND inLibrary IS NOT NULL ORDER BY totalPlayTime",
+        SONG_PLAY_COUNT_SELECT +
+            "JOIN song_artist_map ON song_artist_map.songId = song.id " +
+            "WHERE song_artist_map.artistId = :artistId AND song.inLibrary IS NOT NULL" +
+            PLAY_COUNT_ORDER,
     )
     fun artistSongsByPlayTimeAsc(artistId: String): Flow<List<Song>>
 
@@ -334,8 +403,8 @@ interface DatabaseDao {
         }
 
         return songsFlow.map { songs ->
-            val limitedSongs = if (limit > 0) songs.take(limit) else songs
-            limitedSongs.reversed(descending)
+            val orderedSongs = songs.reversed(descending)
+            if (limit > 0) orderedSongs.take(limit) else orderedSongs
         }
     }
 
@@ -346,13 +415,19 @@ interface DatabaseDao {
         SELECT s.*
         FROM song s
         JOIN (
-            SELECT e.songId, SUM(e.playTime) as totalPlayTime
+            SELECT e.songId, COUNT(*) AS qualifiedPlays, SUM(e.playTime) AS qualifiedPlayTime
             FROM event e
+            JOIN song counted_song ON counted_song.id = e.songId
             JOIN song_artist_map sam ON e.songId = sam.songId
-            WHERE sam.artistId = :artistId AND e.timestamp >= :fromTimeStamp AND e.timestamp <= :toTimeStamp
+            WHERE sam.artistId = :artistId
+              AND e.timestamp >= :fromTimeStamp AND e.timestamp <= :toTimeStamp
+              AND (
+                  (counted_song.duration > 0 AND e.playTime > counted_song.duration * 700)
+                  OR (counted_song.duration <= 0 AND e.playTime >= 30000)
+              )
             GROUP BY e.songId
-        ) AS play_times ON s.id = play_times.songId
-        ORDER BY play_times.totalPlayTime DESC
+        ) AS play_counts ON s.id = play_counts.songId
+        ORDER BY play_counts.qualifiedPlays, play_counts.qualifiedPlayTime, s.id
         """
     )
     fun mostPlayedSongsByArtist(artistId: String, fromTimeStamp: LocalDateTime, toTimeStamp: LocalDateTime): Flow<List<Song>>
@@ -790,23 +865,11 @@ interface DatabaseDao {
     @Transaction
     @SuppressWarnings(RoomWarnings.QUERY_MISMATCH)
     @Query(
-        """
-        SELECT artist.*,
-               (SELECT COUNT(1)
-                FROM song_artist_map
-                         JOIN song ON song_artist_map.songId = song.id
-                WHERE artistId = artist.id
-                  AND song.inLibrary IS NOT NULL) AS songCount
-        FROM artist
-                 JOIN(SELECT artistId, SUM(totalPlayTime) AS totalPlayTime
-                      FROM song_artist_map
-                               JOIN song
-                                    ON song_artist_map.songId = song.id
-                      GROUP BY artistId
-                      ORDER BY totalPlayTime)
-                     ON artist.id = artistId
-        WHERE songCount > 0
-    """
+        "SELECT artist.*, " + ARTIST_LIBRARY_SONG_COUNT + " FROM artist " +
+            ARTIST_PLAY_COUNT_JOIN + " WHERE EXISTS (SELECT 1 FROM song_artist_map sam " +
+            "JOIN song s ON sam.songId = s.id " +
+            "WHERE sam.artistId = artist.id AND s.inLibrary IS NOT NULL)" +
+            GROUP_PLAY_COUNT_ORDER + "artist.id"
     )
     fun artistsByPlayTimeAsc(): Flow<List<Artist>>
 
@@ -828,23 +891,9 @@ interface DatabaseDao {
     @Transaction
     @SuppressWarnings(RoomWarnings.QUERY_MISMATCH)
     @Query(
-        """
-        SELECT artist.*,
-               (SELECT COUNT(1)
-                FROM song_artist_map
-                         JOIN song ON song_artist_map.songId = song.id
-                WHERE artistId = artist.id
-                  AND song.inLibrary IS NOT NULL) AS songCount
-        FROM artist
-                 JOIN(SELECT artistId, SUM(totalPlayTime) AS totalPlayTime
-                      FROM song_artist_map
-                               JOIN song
-                                    ON song_artist_map.songId = song.id
-                      GROUP BY artistId
-                      ORDER BY totalPlayTime)
-                     ON artist.id = artistId
-        WHERE bookmarkedAt IS NOT NULL
-    """
+        "SELECT artist.*, " + ARTIST_LIBRARY_SONG_COUNT + " FROM artist " +
+            ARTIST_PLAY_COUNT_JOIN + " WHERE artist.bookmarkedAt IS NOT NULL" +
+            GROUP_PLAY_COUNT_ORDER + "artist.id"
     )
     fun artistsBookmarkedByPlayTimeAsc(): Flow<List<Artist>>
 
@@ -913,15 +962,7 @@ interface DatabaseDao {
     @Transaction
     @SuppressWarnings(RoomWarnings.QUERY_MISMATCH)
     @Query(
-        """
-        SELECT album.*
-        FROM album
-                 JOIN song
-                      ON song.albumId = album.id
-        WHERE EXISTS(SELECT * FROM song WHERE song.albumId = album.id AND song.inLibrary IS NOT NULL)
-        GROUP BY album.id
-        ORDER BY SUM(song.totalPlayTime)
-    """,
+        "SELECT album.* FROM album " + ALBUM_PLAY_COUNT_JOIN + " WHERE EXISTS (SELECT 1 FROM song WHERE song.albumId = album.id AND song.inLibrary IS NOT NULL)" + GROUP_PLAY_COUNT_ORDER + "album.id"
     )
     fun albumsByPlayTimeAsc(): Flow<List<Album>>
 
@@ -953,15 +994,7 @@ interface DatabaseDao {
     @Transaction
     @SuppressWarnings(RoomWarnings.QUERY_MISMATCH)
     @Query(
-        """
-        SELECT album.*
-        FROM album
-                 JOIN song
-                      ON song.albumId = album.id
-        WHERE bookmarkedAt IS NOT NULL
-        GROUP BY album.id
-        ORDER BY SUM(song.totalPlayTime)
-    """
+        "SELECT album.* FROM album " + ALBUM_PLAY_COUNT_JOIN + " WHERE album.bookmarkedAt IS NOT NULL" + GROUP_PLAY_COUNT_ORDER + "album.id"
     )
     fun albumsLikedByPlayTimeAsc(): Flow<List<Album>>
 
@@ -993,15 +1026,7 @@ interface DatabaseDao {
     @Transaction
     @SuppressWarnings(RoomWarnings.QUERY_MISMATCH)
     @Query(
-        """
-        SELECT album.*
-        FROM album
-                 JOIN song
-                      ON song.albumId = album.id
-        WHERE bookmarkedAt IS NOT NULL
-        GROUP BY album.id
-        ORDER BY SUM(song.totalPlayTime)
-    """
+        "SELECT album.* FROM album " + ALBUM_PLAY_COUNT_JOIN + " WHERE album.isUploaded = 1" + GROUP_PLAY_COUNT_ORDER + "album.id"
     )
     fun albumsUploadedByPlayTimeAsc(): Flow<List<Album>>
 
@@ -1255,7 +1280,7 @@ interface DatabaseDao {
     fun downloadedSongsByNameAsc(): Flow<List<Song>>
 
     @Transaction
-    @Query("SELECT * FROM song WHERE isDownloaded = 1 AND (isEpisode = 0 OR isEpisode IS NULL) ORDER BY totalPlayTime")
+    @Query(SONG_PLAY_COUNT_SELECT + "WHERE song.isDownloaded = 1 AND (song.isEpisode = 0 OR song.isEpisode IS NULL)" + PLAY_COUNT_ORDER)
     fun downloadedSongsByPlayTimeAsc(): Flow<List<Song>>
 
     @Query("UPDATE song SET isDownloaded = :downloaded, dateDownload = :date WHERE id = :songId")
@@ -1276,7 +1301,7 @@ interface DatabaseDao {
     fun uploadedSongsByNameAsc(): Flow<List<Song>>
 
     @Transaction
-    @Query("SELECT * FROM song WHERE isUploaded = 1 ORDER BY totalPlayTime")
+    @Query(SONG_PLAY_COUNT_SELECT + "WHERE song.isUploaded = 1" + PLAY_COUNT_ORDER)
     fun uploadedSongsByPlayTimeAsc(): Flow<List<Song>>
 
     @Transaction
@@ -1326,7 +1351,7 @@ interface DatabaseDao {
     fun podcastEpisodesByNameAsc(): Flow<List<Song>>
 
     @Transaction
-    @Query("SELECT * FROM song WHERE isEpisode = 1 ORDER BY totalPlayTime")
+    @Query(SONG_PLAY_COUNT_SELECT + "WHERE song.isEpisode = 1" + PLAY_COUNT_ORDER)
     fun podcastEpisodesByPlayTimeAsc(): Flow<List<Song>>
 
     @Transaction
@@ -1342,7 +1367,7 @@ interface DatabaseDao {
     fun downloadedPodcastEpisodesByNameAsc(): Flow<List<Song>>
 
     @Transaction
-    @Query("SELECT * FROM song WHERE isEpisode = 1 AND isDownloaded = 1 ORDER BY totalPlayTime")
+    @Query(SONG_PLAY_COUNT_SELECT + "WHERE song.isEpisode = 1 AND song.isDownloaded = 1" + PLAY_COUNT_ORDER)
     fun downloadedPodcastEpisodesByPlayTimeAsc(): Flow<List<Song>>
 
     // Saved episodes (in library but not necessarily downloaded)
@@ -1355,7 +1380,7 @@ interface DatabaseDao {
     fun savedPodcastEpisodesByNameAsc(): Flow<List<Song>>
 
     @Transaction
-    @Query("SELECT * FROM song WHERE isEpisode = 1 AND inLibrary IS NOT NULL ORDER BY totalPlayTime")
+    @Query(SONG_PLAY_COUNT_SELECT + "WHERE song.isEpisode = 1 AND song.inLibrary IS NOT NULL" + PLAY_COUNT_ORDER)
     fun savedPodcastEpisodesByPlayTimeAsc(): Flow<List<Song>>
 
     fun savedPodcastEpisodes(

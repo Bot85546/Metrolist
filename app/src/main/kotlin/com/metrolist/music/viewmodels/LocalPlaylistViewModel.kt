@@ -23,12 +23,14 @@ import com.metrolist.music.utils.dataStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -53,18 +55,28 @@ constructor(
 
     private val _onlinePlaylist = MutableStateFlow<PlaylistItem?>(null)
     val onlinePlaylist: StateFlow<PlaylistItem?> = _onlinePlaylist
+    private val sortPreferences =
+        context.dataStore.data
+            .map {
+                Triple(
+                    it[PlaylistSongSortTypeKey].toEnum(PlaylistSongSortType.CUSTOM),
+                    it[PlaylistSongSortDescendingKey] ?: true,
+                    it[HideVideoSongsKey] ?: false,
+                )
+            }.distinctUntilChanged()
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val songsForSortType =
+        sortPreferences.map { it.first }.distinctUntilChanged().flatMapLatest { sortType ->
+            if (sortType == PlaylistSongSortType.PLAY_TIME) {
+                database.playlistSongsByPlayCountAsc(playlistId)
+            } else {
+                database.playlistSongs(playlistId)
+            }
+        }
+
     val playlistSongs: StateFlow<List<PlaylistSong>> =
-        combine(
-            database.playlistSongs(playlistId),
-            context.dataStore.data
-                .map {
-                    Triple(
-                        it[PlaylistSongSortTypeKey].toEnum(PlaylistSongSortType.CUSTOM),
-                        it[PlaylistSongSortDescendingKey] ?: true,
-                        it[HideVideoSongsKey] ?: false
-                    )
-                }.distinctUntilChanged(),
-        ) { songs, (sortType, sortDescending, hideVideoSongs) ->
+        combine(songsForSortType, sortPreferences) { songs, (sortType, sortDescending, hideVideoSongs) ->
             val filteredSongs = if (hideVideoSongs) {
                 songs.filter { !it.song.song.isVideo }
             } else {
@@ -87,7 +99,7 @@ constructor(
                     )
                 }
 
-                PlaylistSongSortType.PLAY_TIME -> filteredSongs.sortedBy { it.song.song.totalPlayTime }
+                PlaylistSongSortType.PLAY_TIME -> filteredSongs
             }.reversed(sortDescending && sortType != PlaylistSongSortType.CUSTOM)
         }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
