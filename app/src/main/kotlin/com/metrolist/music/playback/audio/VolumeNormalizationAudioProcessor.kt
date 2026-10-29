@@ -57,10 +57,17 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
         if (!inputBuffer.hasRemaining()) return
 
         val gain = currentGain
-        val applyGain = enabled && gain.targetGainMb != 0
+        if (!enabled || gain.targetGainMb == 0) {
+            // Bypass per-sample decoding when normalization does no work.
+            // Copy raw PCM bytes unchanged, preserving every bit of the input.
+            val output = replaceOutputBuffer(inputBuffer.remaining())
+            output.put(inputBuffer)
+            output.flip()
+            return
+        }
+
         val sampleCount = inputBuffer.remaining() / bytesPerSample
         val output = replaceOutputBuffer(sampleCount * bytesPerSample)
-
         inputBuffer.order(ByteOrder.LITTLE_ENDIAN)
         output.order(ByteOrder.LITTLE_ENDIAN)
 
@@ -69,14 +76,10 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
                 repeat(sampleCount) {
                     val sample = inputBuffer.getShort()
                     output.putShort(
-                        if (applyGain) {
-                            (sample * gain.linearGain)
-                                .coerceIn(-32768.0, 32767.0)
-                                .toInt()
-                                .toShort()
-                        } else {
-                            sample
-                        },
+                        (sample * gain.linearGain)
+                            .coerceIn(-32768.0, 32767.0)
+                            .toInt()
+                            .toShort(),
                     )
                 }
 
@@ -87,13 +90,9 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
                     val b2 = inputBuffer.get().toInt()
                     val sample = (b2 shl 16) or (b1 shl 8) or b0
                     val processed =
-                        if (applyGain) {
-                            (sample * gain.linearGain)
-                                .coerceIn(-8388608.0, 8388607.0)
-                                .toInt()
-                        } else {
-                            sample
-                        }
+                        (sample * gain.linearGain)
+                            .coerceIn(-8388608.0, 8388607.0)
+                            .toInt()
                     output.put((processed and 0xFF).toByte())
                     output.put(((processed shr 8) and 0xFF).toByte())
                     output.put(((processed shr 16) and 0xFF).toByte())
@@ -103,28 +102,20 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
                 repeat(sampleCount) {
                     val sample = inputBuffer.getInt()
                     output.putInt(
-                        if (applyGain) {
-                            (sample * gain.linearGain)
-                                .coerceIn(-2147483648.0, 2147483647.0)
-                                .toLong()
-                                .toInt()
-                        } else {
-                            sample
-                        },
+                        (sample * gain.linearGain)
+                            .coerceIn(-2147483648.0, 2147483647.0)
+                            .toLong()
+                            .toInt(),
                     )
                 }
 
-            C.ENCODING_PCM_FLOAT ->
+            C.ENCODING_PCM_FLOAT -> {
+                val linearGain = gain.linearGain.toFloat()
                 repeat(sampleCount) {
                     val sample = inputBuffer.getFloat()
-                    output.putFloat(
-                        if (applyGain) {
-                            (sample * gain.linearGain.toFloat()).coerceIn(-1.0f, 1.0f)
-                        } else {
-                            sample
-                        },
-                    )
+                    output.putFloat((sample * linearGain).coerceIn(-1.0f, 1.0f))
                 }
+            }
         }
 
         output.flip()
