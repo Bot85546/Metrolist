@@ -20,6 +20,7 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
     // gain does not allocate buffers or schedule work on another thread.
     private var hasProcessedAudio = false
     private var lastTargetGainMb = Int.MIN_VALUE
+    private var lastSeenGainState: GainState? = null
     private var renderedLinearGain = 1.0
     private var rampTargetLinearGain = 1.0
     private var rampStepPerFrame = 0.0
@@ -34,17 +35,23 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
             }
         }
 
-    private data class GainState(val targetGainMb: Int, val linearGain: Double)
+    private data class GainState(val targetGainMb: Int, val linearGain: Double, val immediate: Boolean)
 
     @Volatile
-    private var currentGain = GainState(0, 1.0)
+    private var currentGain = GainState(0, 1.0, false)
 
+    /**
+     * immediate=true is for a new track's prepared gain: the first audio
+     * frame must use its exact normalization, even in gapless transitions
+     * where Media3 doesn't necessarily flush the PCM processor.
+     * Ordinary mid-track corrections retain the 60 ms ramp.
+     */
     @Synchronized
-    fun setTargetGain(gainMb: Int) {
-        if (currentGain.targetGainMb != gainMb) {
+    fun setTargetGain(gainMb: Int, immediate: Boolean = false) {
+        if (currentGain.targetGainMb != gainMb || currentGain.immediate != immediate) {
             val linearGain = 10.0.pow(gainMb / 2000.0)
-            currentGain = GainState(gainMb, linearGain)
-            Timber.tag(TAG).d("Target gain set to $gainMb mB (Linear multiplier: $linearGain)")
+            currentGain = GainState(gainMb, linearGain, immediate)
+            Timber.tag(TAG).d("Target gain set to $gainMb mB (Linear multiplier: $linearGain, immediate=$immediate)")
         }
     }
 
@@ -71,6 +78,7 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
         // from the previous song's gain. This is also the initial state.
         hasProcessedAudio = false
         lastTargetGainMb = Int.MIN_VALUE
+        lastSeenGainState = null
         rampFramesRemaining = 0
         renderedLinearGain = 1.0
         rampTargetLinearGain = 1.0
@@ -115,6 +123,13 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
         if (!inputBuffer.hasRemaining()) return
 
         val gain = currentGain
+        if (gain !== lastSeenGainState) {
+            if (gain.immediate) {
+                // A selected track must never inherit the old song's ramp.
+                hasProcessedAudio = false
+            }
+            lastSeenGainState = gain
+        }
         val targetGainMb = if (enabled) gain.targetGainMb else 0
         val targetLinearGain = if (enabled) gain.linearGain else 1.0
         updateRampTarget(targetGainMb, targetLinearGain)
@@ -237,6 +252,7 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
         channelCount = 0
         hasProcessedAudio = false
         lastTargetGainMb = Int.MIN_VALUE
+        lastSeenGainState = null
         rampFramesRemaining = 0
         renderedLinearGain = 1.0
         rampTargetLinearGain = 1.0
