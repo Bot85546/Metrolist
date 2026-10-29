@@ -27,10 +27,16 @@ internal class TrackLoudnessCache(private val capacity: Int = 64) {
 
     @Synchronized
     fun record(mediaId: String, loudnessDb: Double?, perceptualLoudnessDb: Double?) {
-        // No loudness measurements must never overwrite valid ones. This
-        // occurs when the cache is read before fresh metadata is fetched.
-        if (loudnessDb == null && perceptualLoudnessDb == null) return
-        entries[mediaId] = TrackLoudness(loudnessDb, perceptualLoudnessDb)
+        val relative = loudnessDb?.takeIf { it.isFinite() }
+        val absolute = perceptualLoudnessDb?.takeIf { it.isFinite() }
+        if (relative == null && absolute == null) return
+        val previous = entries[mediaId]
+        // A partial response must not downgrade a known absolute measurement
+        // to a client-dependent relative measurement.
+        entries[mediaId] = TrackLoudness(
+            relative ?: previous?.loudnessDb,
+            absolute ?: previous?.perceptualLoudnessDb,
+        )
     }
 
     @Synchronized

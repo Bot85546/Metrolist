@@ -8,6 +8,9 @@ import timber.log.Timber
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.pow
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 @UnstableApi
 class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
@@ -25,6 +28,8 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
     private var rampTargetLinearGain = 1.0
     private var rampStepPerFrame = 0.0
     private var rampFramesRemaining = 0
+    private var peakGain = 1.0
+    private var peakReleaseStep = 0.0
 
     @Volatile
     var enabled = false
@@ -48,12 +53,13 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
      */
     @Synchronized
     fun setTargetGain(gainMb: Int, immediate: Boolean = false) {
+        val boundedGainMb = gainMb.coerceIn(-3000, 1200)
         // Keep a pending immediate track-boundary request intact if another
         // callback redundantly reapplies the same gain without that flag.
         // Only a genuinely different gain can replace it with a ramp request.
-        if (currentGain.targetGainMb != gainMb || (immediate && !currentGain.immediate)) {
-            val linearGain = 10.0.pow(gainMb / 2000.0)
-            currentGain = GainState(gainMb, linearGain, immediate)
+        if (currentGain.targetGainMb != boundedGainMb || immediate) {
+            val linearGain = 10.0.pow(boundedGainMb / 2000.0)
+            currentGain = GainState(boundedGainMb, linearGain, immediate)
             Timber.tag(TAG).d("Target gain set to $gainMb mB (Linear multiplier: $linearGain, immediate=$immediate)")
         }
     }
@@ -62,6 +68,7 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
         encoding = inputAudioFormat.encoding
         sampleRate = inputAudioFormat.sampleRate
         channelCount = inputAudioFormat.channelCount
+        peakReleaseStep = 1.0 / (sampleRate * 0.100)
         bytesPerSample =
             when (encoding) {
                 C.ENCODING_PCM_16BIT -> 2
@@ -80,6 +87,7 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
         // Audio after a flush should start at the selected gain, not ramp up
         // from the previous song's gain. This is also the initial state.
         hasProcessedAudio = false
+        peakGain = 1.0
         lastTargetGainMb = Int.MIN_VALUE
         lastSeenGainState = null
         rampFramesRemaining = 0
@@ -122,6 +130,33 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
         return renderedLinearGain
     }
 
+    /** Linked sample-peak protection: inspect only the current frame, with no lookahead buffer. */
+    private fun limitFrameGain(input: ByteBuffer, requestedGain: Double): Double {
+        if (requestedGain <= 1.0 && peakGain == 1.0) return requestedGain
+        var peak = 0.0
+        val start = input.position()
+        for (channel in 0 until channelCount) {
+            val offset = start + channel * bytesPerSample
+            val sample = when (encoding) {
+                C.ENCODING_PCM_16BIT -> input.getShort(offset) / 32768.0
+                C.ENCODING_PCM_24BIT -> {
+                    val value = (input.get(offset).toInt() and 255) or
+                        ((input.get(offset + 1).toInt() and 255) shl 8) or
+                        (input.get(offset + 2).toInt() shl 16)
+                    value / 8388608.0
+                }
+                C.ENCODING_PCM_32BIT -> input.getInt(offset) / 2147483648.0
+                C.ENCODING_PCM_FLOAT -> input.getFloat(offset).toDouble()
+                else -> 0.0
+            }
+            peak = max(peak, abs(sample))
+        }
+        val amplifiedPeak = peak * requestedGain
+        val safeGain = if (amplifiedPeak > PEAK_CEILING) PEAK_CEILING / amplifiedPeak else 1.0
+        peakGain = min(safeGain, min(1.0, peakGain + peakReleaseStep))
+        return requestedGain * peakGain
+    }
+
     override fun queueInput(inputBuffer: ByteBuffer) {
         if (!inputBuffer.hasRemaining()) return
 
@@ -130,6 +165,7 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
             if (gain.immediate) {
                 // A selected track must never inherit the old song's ramp.
                 hasProcessedAudio = false
+                peakGain = 1.0
             }
             lastSeenGainState = gain
         }
@@ -143,7 +179,7 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
         val frameCount = inputBuffer.remaining() / frameBytes
         val ramping = rampFramesRemaining > 0
 
-        if (!ramping && targetGainMb == 0) {
+        if (!ramping && targetGainMb == 0 && peakGain == 1.0) {
             // Once the ramp is finished, unity gain is a bit-exact PCM copy.
             // No per-sample decoding, multiplications or extra allocations.
             val output = replaceOutputBuffer(inputBuffer.remaining())
@@ -159,9 +195,8 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
         inputBuffer.order(ByteOrder.LITTLE_ENDIAN)
         output.order(ByteOrder.LITTLE_ENDIAN)
 
-        if (!ramping) {
-            // The normal playback path retains one multiplier per buffer.
-            // The per-frame ramp runs only for ~60 ms following an update.
+        if (!ramping && targetLinearGain <= 1.0 && peakGain == 1.0) {
+            // Attenuation needs no peak detector: retain one multiplier per buffer.
             val linearGain = targetLinearGain
             when (encoding) {
                 C.ENCODING_PCM_16BIT ->
@@ -201,7 +236,7 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
             when (encoding) {
                 C.ENCODING_PCM_16BIT ->
                     repeat(frameCount) {
-                        val linearGain = nextFrameGain()
+                        val linearGain = limitFrameGain(inputBuffer, nextFrameGain())
                         repeat(channelCount) {
                             val sample = inputBuffer.getShort()
                             output.putShort(
@@ -211,7 +246,7 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
                     }
                 C.ENCODING_PCM_24BIT ->
                     repeat(frameCount) {
-                        val linearGain = nextFrameGain()
+                        val linearGain = limitFrameGain(inputBuffer, nextFrameGain())
                         repeat(channelCount) {
                             val b0 = inputBuffer.get().toInt() and 0xFF
                             val b1 = inputBuffer.get().toInt() and 0xFF
@@ -225,7 +260,7 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
                     }
                 C.ENCODING_PCM_32BIT ->
                     repeat(frameCount) {
-                        val linearGain = nextFrameGain()
+                        val linearGain = limitFrameGain(inputBuffer, nextFrameGain())
                         repeat(channelCount) {
                             val sample = inputBuffer.getInt()
                             output.putInt(
@@ -235,7 +270,7 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
                     }
                 C.ENCODING_PCM_FLOAT ->
                     repeat(frameCount) {
-                        val floatGain = nextFrameGain().toFloat()
+                        val floatGain = limitFrameGain(inputBuffer, nextFrameGain()).toFloat()
                         repeat(channelCount) {
                             val sample = inputBuffer.getFloat()
                             output.putFloat((sample * floatGain).coerceIn(-1.0f, 1.0f))
@@ -254,6 +289,7 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
         sampleRate = 0
         channelCount = 0
         hasProcessedAudio = false
+        peakGain = 1.0
         lastTargetGainMb = Int.MIN_VALUE
         lastSeenGainState = null
         rampFramesRemaining = 0
@@ -265,5 +301,7 @@ class VolumeNormalizationAudioProcessor : BaseAudioProcessor() {
     private companion object {
         const val TAG = "VolumeNormalizationProcessor"
         const val RAMP_DURATION_MS = 60L
+        // -1 dBFS sample ceiling; no oversampling, so this is not a true-peak limiter.
+        const val PEAK_CEILING = 0.8912509381337456
     }
 }

@@ -7,6 +7,7 @@
 
 package com.metrolist.music.playback
 
+import kotlin.math.roundToInt
 import android.app.ForegroundServiceStartNotAllowedException
 import android.app.Notification
 import android.app.NotificationChannel
@@ -1277,6 +1278,7 @@ class MusicService :
 
     private fun createExoPlayer(prefs: Preferences? = null): ExoPlayer {
         val normalizationProcessor = VolumeNormalizationAudioProcessor()
+        applyAudioNormalization(normalizationProcessor, null, null, immediate = true)
         val eqProcessor = CustomEqualizerAudioProcessor()
 
         val silenceProcessor = SilenceDetectorAudioProcessor { handleLongSilenceDetected() }
@@ -2312,6 +2314,7 @@ class MusicService :
         val gain =
             if (normalizationEnabledCached) {
                 normalizationGainMb(loudnessDb, perceptualLoudnessDb, loudnessLevelCached.targetLufs)
+                    ?: fallbackNormalizationGainMb(loudnessLevelCached.targetLufs)
             } else {
                 null
             }
@@ -5129,13 +5132,21 @@ internal fun normalizationGainMb(
     perceptualLoudnessDb: Double?,
     targetLufs: Float,
 ): Int? {
-    val measuredLufs = perceptualLoudnessDb ?: loudnessDb?.let { it + LoudnessLevel.AGGRESSIVE.targetLufs }
-    return measuredLufs
-        ?.let { (-(it - targetLufs) * 100.0).toInt() }
-        // Allow up to +6 dB for quiet tracks; retain the -15 dB reduction
-        // limit. The PCM processor still clips peaks, so this is not a limiter.
-        ?.coerceIn(-1500, 600)
+    if (!targetLufs.isFinite()) return null
+    // shortcut: legacy-only metadata has no client reference tag; retain the
+    // existing Music-client -7 dB reference until the extractor exposes one.
+    val measuredLufs = perceptualLoudnessDb?.takeIf { it.isFinite() }
+        ?: loudnessDb?.takeIf { it.isFinite() }?.let { it - 7.0 }
+        ?: return null
+    return ((targetLufs.toDouble() - measuredLufs) * 100.0)
+        .coerceIn(-3000.0, 1200.0)
+        .roundToInt()
 }
+
+// Missing measurements must not turn a track up to unattenuated full volume.
+// This is a conservative estimate, not a loudness measurement.
+internal fun fallbackNormalizationGainMb(targetLufs: Float): Int =
+    if (targetLufs.isFinite()) ((targetLufs - (-7f)) * 100f).coerceIn(-3000f, 0f).roundToInt() else -700
 
 /**
  * Offload plays encoded audio directly and bypasses the Media3 PCM

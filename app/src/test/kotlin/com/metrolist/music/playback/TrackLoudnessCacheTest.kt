@@ -48,4 +48,16 @@ class TrackLoudnessCacheTest {
     fun `rejects zero capacity`() {
         TrackLoudnessCache(capacity = 0)
     }
+    @Test
+    fun `partial or invalid responses preserve absolute measurements`() {
+        val cache = TrackLoudnessCache()
+        cache.record("song", 1.0, -13.0)
+        cache.record("song", 2.0, null)
+        assertEquals(TrackLoudness(2.0, -13.0), cache.get("song"))
+        cache.record("song", Double.NaN, Double.POSITIVE_INFINITY)
+        assertEquals(TrackLoudness(2.0, -13.0), cache.get("song"))
+        cache.record("bad", Double.NaN, null)
+        assertNull(cache.get("bad"))
+    }
+
 }

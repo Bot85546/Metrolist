@@ -50,9 +50,9 @@ class VolumeNormalizationAudioProcessorTest {
         processor.enabled = true
 
         processor.queueInput(
-            ByteBuffer.allocateDirect(Short.SIZE_BYTES)
+            ByteBuffer.allocateDirect(2 * Short.SIZE_BYTES)
                 .order(ByteOrder.LITTLE_ENDIAN)
-                .apply { putShort(1000); flip() }
+                .apply { putShort(1000); putShort(1000); flip() }
         )
         val output = processor.output.order(ByteOrder.LITTLE_ENDIAN)
 
@@ -228,6 +228,127 @@ class VolumeNormalizationAudioProcessorTest {
         val lastRight = ramped.getFloat(ramped.limit() - 4)
         assertEquals(lastLeft, lastRight, 0.00001f)
         assertEquals((0.5 * 10.0.pow(-0.3)).toFloat(), lastLeft, 0.00001f)
+    }
+
+    @Test
+    fun `boosted peaks are limited before output and both channels keep their ratio`() {
+        val processor = configuredProcessor().apply {
+            enabled = true
+            setTargetGain(1200)
+        }
+        val input = ByteBuffer.allocateDirect(4).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putShort(30_000.toShort())
+            putShort(15_000.toShort())
+            flip()
+        }
+        processor.queueInput(input)
+        assertEquals(0, input.remaining())
+        val output = processor.output.order(ByteOrder.LITTLE_ENDIAN)
+        assertEquals(4, output.remaining()) // No held frames or lookahead delay.
+        val left = output.getShort().toInt()
+        val right = output.getShort().toInt()
+        org.junit.Assert.assertTrue(left in 29_190..29_205)
+        org.junit.Assert.assertTrue(kotlin.math.abs(left - 2 * right) <= 1)
+    }
+
+    @Test
+    fun `peak limiting releases across buffers and resets on a new track`() {
+        val processor = configuredProcessor().apply {
+            enabled = true
+            setTargetGain(1200)
+        }
+        processor.queueInput(pcm16Buffer(1))
+        processor.output
+        val quiet = pcm16Buffer(4_800).apply {
+            clear()
+            repeat(9_600) { putShort(1000) }
+            flip()
+        }
+        processor.queueInput(quiet)
+        val output = processor.output.order(ByteOrder.LITTLE_ENDIAN)
+        val first = output.getShort().toInt()
+        val last = output.getShort(output.limit() - 4).toInt()
+        org.junit.Assert.assertTrue(first < last)
+        assertEquals((1000 * 10.0.pow(0.6)).toInt(), last)
+        processor.setTargetGain(-600, immediate = true)
+        processor.queueInput(pcm16Buffer(1))
+        org.junit.Assert.assertTrue(processor.output.order(ByteOrder.LITTLE_ENDIAN).getShort().toInt() in 5_000..5_030)
+    }
+
+    @Test
+    fun `peak protection covers every supported PCM encoding and polarity`() {
+        for (encoding in listOf(C.ENCODING_PCM_16BIT, C.ENCODING_PCM_24BIT, C.ENCODING_PCM_32BIT, C.ENCODING_PCM_FLOAT)) {
+            val size = if (encoding == C.ENCODING_PCM_16BIT) 2 else if (encoding == C.ENCODING_PCM_24BIT) 3 else 4
+            val processor = VolumeNormalizationAudioProcessor().apply {
+                configure(AudioProcessor.AudioFormat(48_000, 2, encoding))
+                flush()
+                enabled = true
+                setTargetGain(1200)
+            }
+            val input = ByteBuffer.allocateDirect(2 * size).order(ByteOrder.LITTLE_ENDIAN).apply {
+                for (sign in listOf(1, -1)) {
+                    when (encoding) {
+                        C.ENCODING_PCM_16BIT -> putShort((sign * 32767).toShort())
+                        C.ENCODING_PCM_24BIT -> {
+                            val sample = sign * 8388607
+                            put(sample.toByte()); put((sample shr 8).toByte()); put((sample shr 16).toByte())
+                        }
+                        C.ENCODING_PCM_32BIT -> putInt(sign * Int.MAX_VALUE)
+                        C.ENCODING_PCM_FLOAT -> putFloat(sign.toFloat())
+                    }
+                }
+                flip()
+            }
+            processor.queueInput(input)
+            val output = processor.output.order(ByteOrder.LITTLE_ENDIAN)
+            assertEquals(2 * size, output.remaining())
+            repeat(2) {
+                val sample = when (encoding) {
+                    C.ENCODING_PCM_16BIT -> output.getShort() / 32768.0
+                    C.ENCODING_PCM_24BIT -> {
+                        val value = (output.get().toInt() and 255) or ((output.get().toInt() and 255) shl 8) or (output.get().toInt() shl 16)
+                        value / 8388608.0
+                    }
+                    C.ENCODING_PCM_32BIT -> output.getInt() / 2147483648.0
+                    else -> output.getFloat().toDouble()
+                }
+                org.junit.Assert.assertTrue(kotlin.math.abs(sample) <= 0.891251)
+                org.junit.Assert.assertTrue(kotlin.math.abs(sample) >= 0.8911)
+            }
+        }
+    }
+
+    @Test
+    fun `a new track with the same target does not inherit peak reduction`() {
+        val processor = configuredProcessor().apply { enabled = true; setTargetGain(1200, immediate = true) }
+        processor.queueInput(pcm16Buffer(1))
+        processor.output
+        processor.setTargetGain(1200, immediate = true)
+        processor.setTargetGain(1200) // Redundant callback must preserve the reset.
+        processor.queueInput(ByteBuffer.allocateDirect(4).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putShort(1000); putShort(1000); flip()
+        })
+        assertEquals(3981, processor.output.order(ByteOrder.LITTLE_ENDIAN).getShort().toInt())
+    }
+
+    @Test
+    fun `sustained processing reuses output storage and stays frame aligned`() {
+        for (gain in listOf(-700, 1200)) {
+            val processor = configuredProcessor().apply { enabled = true; setTargetGain(gain) }
+            val input = pcm16Buffer(1_024)
+            processor.queueInput(input)
+            val storage = processor.output
+            val started = System.nanoTime()
+            repeat(4_000) {
+                input.rewind()
+                processor.queueInput(input)
+                val output = processor.output
+                org.junit.Assert.assertSame(storage, output)
+                assertEquals(4_096, output.remaining())
+            }
+            val elapsedMs = (System.nanoTime() - started) / 1_000_000.0
+            println("Normalization benchmark: gain=$gain, audioMs=85333, elapsedMs=$elapsedMs")
+        }
     }
 
     private fun pcm16Buffer(frames: Int): ByteBuffer =

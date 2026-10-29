@@ -69,7 +69,7 @@ jobs:
           key: ${{ steps.pr_keystore.outputs.cache-primary-key }}
 
       - name: Run tests and build optimized Metrolitt APK
-        run: ./gradlew --console=plain testGmsDebugUnitTest assembleGmsRelease --warning-mode summary
+        run: ./gradlew --console=plain testGmsDebugUnitTest :app:assembleFossDebug assembleGmsRelease --warning-mode summary
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           METROLIST_APPLICATION_ID: com.metrolitt.music
@@ -112,3 +112,11 @@ jobs:
           path: Metrolitt.apk
           archive: false
           if-no-files-found: error
+
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: Metrolitt-Test-Reports
+          path: app/build/test-results/testGmsDebugUnitTest/
+          if-no-files-found: ignore

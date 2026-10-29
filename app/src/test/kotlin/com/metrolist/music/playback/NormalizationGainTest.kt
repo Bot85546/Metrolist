@@ -17,8 +17,8 @@ class NormalizationGainTest {
 
     @Test
     fun `gain is clamped to processor limits`() {
-        assertEquals(600, normalizationGainMb(-30.0, null, -14f))
-        assertEquals(-1500, normalizationGainMb(null, 10.0, -14f))
+        assertEquals(1200, normalizationGainMb(-30.0, null, -14f))
+        assertEquals(-2400, normalizationGainMb(null, 10.0, -14f))
     }
 
     @Test
@@ -79,7 +79,38 @@ class NormalizationGainTest {
     @Test
     fun `balanced loudness highlights the cap on quiet recordings`() {
         assertEquals(-500, normalizationGainMb(null, -9.0, -14f))
-        assertEquals(600, normalizationGainMb(null, -24.0, -14f))
+        assertEquals(1000, normalizationGainMb(null, -24.0, -14f))
+    }
+
+    @Test
+    fun `gain conversion rounds floating point metadata consistently`() {
+        assertEquals(-156, normalizationGainMb(null, -12.44, -14f))
+        assertEquals(-156, normalizationGainMb(-5.4399996, null, -14f))
+        for (hundredths in -3000..0) {
+            val measured = hundredths / 100.0
+            assertEquals(
+                normalizationGainMb(null, measured, -14f),
+                normalizationGainMb(measured + 7.0, null, -14f),
+            )
+        }
+    }
+
+    @Test
+    fun `invalid metadata falls back without corrupting gain`() {
+        assertEquals(-700, normalizationGainMb(0.0, Double.NaN, -14f))
+        assertNull(normalizationGainMb(Double.POSITIVE_INFINITY, Double.NaN, -14f))
+        assertNull(normalizationGainMb(null, -10.0, Float.NaN))
+        assertEquals(-3000, normalizationGainMb(null, Double.MAX_VALUE, -14f))
+        assertEquals(1200, normalizationGainMb(null, -Double.MAX_VALUE, -14f))
+    }
+
+    @Test
+    fun `unknown songs use a conservative non boosting fallback at every level`() {
+        assertEquals(-700, fallbackNormalizationGainMb(-14f))
+        assertEquals(-1200, fallbackNormalizationGainMb(-19f))
+        assertEquals(-400, fallbackNormalizationGainMb(-11f))
+        assertEquals(0, fallbackNormalizationGainMb(-7f))
+        assertEquals(-700, fallbackNormalizationGainMb(Float.NaN))
     }
 
 }
