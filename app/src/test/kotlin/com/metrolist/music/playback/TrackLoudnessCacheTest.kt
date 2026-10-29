@@ -44,6 +44,44 @@ class TrackLoudnessCacheTest {
         assertEquals(TrackLoudness(-3.0, -11.0), cache.get("C"))
     }
 
+    @Test
+    fun `learns both seven and fourteen LUFS reference scales per extraction client`() {
+        val cache = TrackLoudnessCache()
+        cache.record("music-anchor", -5.44, -12.44, clientName = "MUSIC")
+        cache.record("web-anchor", 1.56, -12.44, clientName = "WEB")
+        cache.record("music-relative", -5.44, null, clientName = "MUSIC")
+        cache.record("web-relative", 1.56, null, clientName = "WEB")
+
+        assertEquals(-7.0, cache.referenceFor("music-relative")!!, 0.0001)
+        assertEquals(-14.0, cache.referenceFor("web-relative")!!, 0.0001)
+        assertNull(cache.referenceFor("music-anchor"))
+        assertNull(cache.referenceFor("web-anchor"))
+    }
+
+    @Test
+    fun `refuses uncalibrated and conflicting client reference scales`() {
+        val cache = TrackLoudnessCache()
+        cache.record("unknown", 0.5, null, clientName = "UNKNOWN")
+        assertNull(cache.referenceFor("unknown"))
+
+        cache.record("anchor1", 0.5, -13.5, clientName = "UNSTABLE")
+        cache.record("relative", 0.5, null, clientName = "UNSTABLE")
+        assertEquals(-14.0, cache.referenceFor("relative")!!, 0.0001)
+        cache.record("anchor2", -6.5, -13.5, clientName = "UNSTABLE")
+        assertNull(cache.referenceFor("relative"))
+    }
+
+    @Test
+    fun `partial updates preserve the extraction client and calibrated reference`() {
+        val cache = TrackLoudnessCache()
+        cache.record("anchor", -6.0, -13.0, clientName = "MUSIC")
+        cache.record("partial", -6.0, null, clientName = "MUSIC")
+        cache.record("partial", -5.0, null)
+
+        assertEquals(TrackLoudness(-5.0, null, "MUSIC"), cache.get("partial"))
+        assertEquals(-7.0, cache.referenceFor("partial")!!, 0.0001)
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun `rejects zero capacity`() {
         TrackLoudnessCache(capacity = 0)
