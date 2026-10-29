@@ -31,4 +31,37 @@ class NormalizationGainTest {
     fun `missing loudness disables normalization`() {
         assertNull(normalizationGainMb(null, null, -14f))
     }
+    @Test
+    fun `normalization always disables offload so PCM gain is applied`() {
+        assertEquals(false, shouldEnableAudioOffload(
+            offloadPreferred = true,
+            crossfadeEnabled = false,
+            normalizationEnabled = true,
+        ))
+        assertEquals(false, shouldEnableAudioOffload(
+            offloadPreferred = true,
+            crossfadeEnabled = true,
+            normalizationEnabled = true,
+        ))
+    }
+
+    @Test
+    fun `offload remains available when neither normalization nor crossfade is active`() {
+        assertEquals(true, shouldEnableAudioOffload(
+            offloadPreferred = true,
+            crossfadeEnabled = false,
+            normalizationEnabled = false,
+        ))
+        assertEquals(false, shouldEnableAudioOffload(
+            offloadPreferred = false,
+            crossfadeEnabled = false,
+            normalizationEnabled = false,
+        ))
+        assertEquals(false, shouldEnableAudioOffload(
+            offloadPreferred = true,
+            crossfadeEnabled = true,
+            normalizationEnabled = false,
+        ))
+    }
+
 }
