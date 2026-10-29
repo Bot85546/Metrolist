@@ -2290,7 +2290,7 @@ class MusicService :
      * the resolver will apply the new track's gain before providing its audio
      * bytes, if loudness data becomes available.
      */
-    private fun applyPreparedAudioNormalizationNow() {
+    private fun applyPreparedAudioNormalizationNow(immediate: Boolean = false) {
         if (!::player.isInitialized) return
         val processor = playerNormalizationProcessors[player] ?: return
         val loudness = player.currentMediaItem?.mediaId?.let(trackLoudnessCache::get)
@@ -2298,6 +2298,7 @@ class MusicService :
             processor = processor,
             loudnessDb = loudness?.loudnessDb,
             perceptualLoudnessDb = loudness?.perceptualLoudnessDb,
+            immediate = immediate,
         )
     }
 
@@ -2305,6 +2306,7 @@ class MusicService :
         processor: VolumeNormalizationAudioProcessor,
         loudnessDb: Double?,
         perceptualLoudnessDb: Double?,
+        immediate: Boolean = false,
     ) {
         val gain =
             if (normalizationEnabledCached) {
@@ -2314,10 +2316,10 @@ class MusicService :
             }
 
         if (gain != null) {
-            processor.setTargetGain(gain)
+            processor.setTargetGain(gain, immediate = immediate)
             processor.enabled = true
         } else {
-            processor.setTargetGain(0)
+            processor.setTargetGain(0, immediate = immediate)
             processor.enabled = false
         }
     }
@@ -2333,6 +2335,10 @@ class MusicService :
         // are not yet the player's currentMediaItem. Never change the active
         // processor just because a future song is being buffered.
         trackLoudnessCache.record(mediaId, loudnessDb, perceptualLoudnessDb)
+        // Missing metadata does not justify a main-thread round trip. If a
+        // stream response contains usable measurements, this method is called
+        // again before the newly resolved stream is handed to the player.
+        val prepared = trackLoudnessCache.get(mediaId) ?: return
 
         // The data-source resolver runs before it hands audio bytes to
         // ExoPlayer. Apply a current track's gain synchronously here rather
@@ -2345,11 +2351,13 @@ class MusicService :
                 return@runBlocking
             }
 
-            val prepared = trackLoudnessCache.get(mediaId)
             applyAudioNormalization(
                 processor = processor,
-                loudnessDb = prepared?.loudnessDb,
-                perceptualLoudnessDb = prepared?.perceptualLoudnessDb,
+                loudnessDb = prepared.loudnessDb,
+                perceptualLoudnessDb = prepared.perceptualLoudnessDb,
+                // Existing playback gets a short correction ramp; loading a
+                // newly selected track must begin at the prepared gain.
+                immediate = !targetPlayer.isPlaying || targetPlayer.currentPosition <= 100L,
             )
         }
     }
@@ -2543,7 +2551,7 @@ class MusicService :
 
         lastPlaybackSpeed = -1.0f // force update song
 
-        applyPreparedAudioNormalizationNow()
+        applyPreparedAudioNormalizationNow(immediate = true)
 
         scrobbleManager?.onSongStop()
         if (player.playWhenReady && player.playbackState == Player.STATE_READY) {
