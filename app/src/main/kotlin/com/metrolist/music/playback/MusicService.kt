@@ -978,6 +978,10 @@ class MusicService :
                 newPlayer.prepare()
 
                 player = newPlayer
+                deviceConnectManager.attachPlayer(newPlayer)
+                if (deviceConnectManager.isRemoteActive) {
+                    deviceConnectManager.remoteMirrorPlayer?.let { mediaSession?.player = it }
+                }
                 _playerFlow.value = newPlayer
 
                 Timber.tag("MusicService").i("Player recreated with AudioTrackPlaybackParams: $useAudioTrackParams")
@@ -1624,6 +1628,16 @@ class MusicService :
         restoringQueue: Boolean = false,
     ) {
         if (taskCleared) return
+        if (deviceConnectManager.isRemoteActive) {
+            // Some entry points (widgets, media controllers and restored navigation)
+            // bypass PlayerConnection. They must never start a second local stream.
+            scope.launch {
+                runCatching { withContext(Dispatchers.IO) { queue.getInitialStatus() } }
+                    .onSuccess(deviceConnectManager::submitRemoteQueue)
+                    .onFailure { Timber.tag(TAG).w(it, "Could not forward selected queue to remote owner") }
+            }
+            return
+        }
         if (!playerInitialized.value) {
             Timber.tag(TAG).w("playQueue called before player initialization, queuing request")
             scope.launch {
@@ -4457,6 +4471,7 @@ class MusicService :
 
         fadingPlayer = currentPlayer
         player = nextPlayer
+        deviceConnectManager.attachPlayer(nextPlayer)
         _playerFlow.value = player
         secondaryPlayer = null
 
@@ -4494,7 +4509,9 @@ class MusicService :
         sleepTimer?.player = player
 
         try {
-            mediaSession?.let { (it as MediaSession).player = player }
+            mediaSession?.let { (it as MediaSession).player =
+                if (deviceConnectManager.isRemoteActive) deviceConnectManager.remoteMirrorPlayer ?: player
+                else player }
         } catch (e: Exception) {
             timber.log.Timber.e(e, "Failed to swap player in MediaSession")
         }

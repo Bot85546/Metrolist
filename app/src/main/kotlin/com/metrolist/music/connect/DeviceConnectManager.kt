@@ -51,6 +51,7 @@ class DeviceConnectManager @Inject constructor(
 ) : DeviceConnectTransport.Listener {
     companion object {
         private const val DISCOVERY_WINDOW_MS = 12_000L
+        private const val PAIRING_DISCOVERY_WINDOW_MS = 45_000L
         private const val HANDSHAKE_TIMEOUT_MS = 15_000L
         private const val WARM_DISCONNECT_MS = 120_000L
 
@@ -113,14 +114,16 @@ class DeviceConnectManager @Inject constructor(
     private var incomingQueue: IncomingQueue? = null
 
     val isRemoteActive: Boolean
-        get() = authenticated && syncEnabled && _state.value.remotePlayback?.track != null &&
-            player?.isPlaying != true && player?.playWhenReady != true
+        get() = authenticated && syncEnabled && remoteOwnsPlayback
     private var foreground = false
     private var pairingMode = false
     private var manuallyDisconnected = preferences.getBoolean("manually_disconnected", false)
     // A manual disconnect suspends synchronization but keeps the already-authenticated Nearby
     // channel warm. Reconnecting within the same app process then needs no Bluetooth discovery.
     private var syncEnabled = true
+    // A linked controller must not become a second audio output merely because a local
+    // playback request slips through. Only a deliberate disconnect releases ownership.
+    private var remoteOwnsPlayback = false
     private var suspendGeneration = 0L
     private var discoveryUntilMs = 0L
     private var reconnectAttempts = 0
@@ -141,10 +144,10 @@ class DeviceConnectManager @Inject constructor(
     private val playerListener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
             if (events.contains(Player.EVENT_IS_PLAYING_CHANGED) &&
-                player.isPlaying && _state.value.remotePlayback?.playing == true
+                player.isPlaying && isRemoteActive
             ) {
-                // Starting playback here transfers the active role to this device.
-                sendCommand("PAUSE")
+                // Accidental local playback must never interrupt the remote owner.
+                player.pause()
             }
             if (events.containsAny(
                     Player.EVENT_IS_PLAYING_CHANGED,
@@ -214,8 +217,10 @@ class DeviceConnectManager @Inject constructor(
         pairingMode = true
         manuallyDisconnected = false
         preferences.edit().putBoolean("manually_disconnected", false).apply()
-        discoveryUntilMs = SystemClock.elapsedRealtime() + DISCOVERY_WINDOW_MS
+        discoveryUntilMs = SystemClock.elapsedRealtime() + PAIRING_DISCOVERY_WINDOW_MS
         _state.value = _state.value.copy(pairingMode = true, status = "Searching for your other Galaxy device…")
+        // A fresh attempt must rediscover endpoints that Nearby may have cached before Forget.
+        if (!connected) transport.stopDiscovery()
         updateTransport()
     }
 
@@ -274,7 +279,10 @@ class DeviceConnectManager @Inject constructor(
         resetConnection(closeEndpoint = true)
         trust.forget()
         trustedPeer = null
-        _state.value = _state.value.copy(trustedDeviceName = null, status = "Device forgotten")
+        manuallyDisconnected = false
+        preferences.edit().putBoolean("manually_disconnected", false).apply()
+        _state.value = _state.value.copy(trustedDeviceName = null, status = "Device forgotten. Searching again…")
+        beginPairing()
     }
 
     fun sendCommand(action: String, argument: Long = 0L) {
@@ -319,6 +327,7 @@ class DeviceConnectManager @Inject constructor(
         if (!authenticated) return
         val previous = _state.value.remotePlayback
         syncEnabled = false
+        remoteOwnsPlayback = false
         incomingQueue = null
         latestRemoteRevision = -1L
         _state.value = _state.value.copy(connected = false, remotePlayback = null,
@@ -340,6 +349,7 @@ class DeviceConnectManager @Inject constructor(
         manuallyDisconnected = false
         preferences.edit().putBoolean("manually_disconnected", false).apply()
         syncEnabled = true
+        remoteOwnsPlayback = false
         _state.value = _state.value.copy(connected = true, status = "Connected securely")
         send(DeviceConnectPacket(type = "SYNC_MODE",
             action = if (player?.isPlaying == true) "KEEP_SENDER" else "KEEP_RECEIVER"))
@@ -349,13 +359,17 @@ class DeviceConnectManager @Inject constructor(
 
     /** Transfers the selected playlist without decoding or streaming any audio on this device. */
     fun submitRemoteQueue(status: Queue.Status) {
-        if (!isRemoteActive || status.items.isEmpty()) return
-        val source = status.items.take(1500)
+        submitRemoteMediaItems(status.items, status.mediaItemIndex, status.title)
+    }
+
+    fun submitRemoteMediaItems(items: List<MediaItem>, startIndex: Int, title: String? = null) {
+        if (!isRemoteActive || items.isEmpty()) return
+        val source = items.take(1500)
         val transferId = UUID.randomUUID().toString()
         send(DeviceConnectPacket(
             type = "QUEUE_BEGIN", transferId = transferId,
-            queueTitle = status.title.orEmpty(), queueTotal = source.size,
-            queueStart = status.mediaItemIndex.coerceIn(0, source.lastIndex),
+            queueTitle = title.orEmpty(), queueTotal = source.size,
+            queueStart = startIndex.coerceIn(0, source.lastIndex),
         ))
         source.chunked(12).forEachIndexed { chunk, items ->
             send(DeviceConnectPacket(
@@ -550,6 +564,15 @@ class DeviceConnectManager @Inject constructor(
                 if (snapshot.revision < latestRemoteRevision) return
                 latestRemoteRevision = snapshot.revision
                 val oldSnapshot = _state.value.remotePlayback
+                if (!remoteOwnsPlayback && snapshot.track != null &&
+                    (snapshot.playing || player?.currentMediaItem == null) &&
+                    player?.isPlaying != true
+                ) {
+                    remoteOwnsPlayback = true
+                    // A local player may be buffering with playWhenReady=true. Prevent it
+                    // from producing a second audio stream after remote ownership is chosen.
+                    if (player?.playWhenReady == true) player?.pause()
+                }
                 _state.value = _state.value.copy(
                     remotePlayback = snapshot.copy(updatedAtMs = SystemClock.elapsedRealtime()),
                 )
@@ -680,6 +703,7 @@ class DeviceConnectManager @Inject constructor(
         if (authenticated) return
         authenticated = true
         syncEnabled = true
+        remoteOwnsPlayback = false
         reconnectAttempts = 0
         reconnectGeneration++
         pairingMode = false
@@ -778,11 +802,20 @@ class DeviceConnectManager @Inject constructor(
             SystemClock.elapsedRealtime() < discoveryUntilMs
         ) {
             transport.discover()
+            val deadline = discoveryUntilMs
             handler.postDelayed({
-                if (SystemClock.elapsedRealtime() >= discoveryUntilMs && !connected) {
+                if (deadline == discoveryUntilMs &&
+                    SystemClock.elapsedRealtime() >= deadline && !connected && endpointId == null
+                ) {
                     transport.stopDiscovery()
+                    if (pairingMode) {
+                        pairingMode = false
+                        _state.value = _state.value.copy(pairingMode = false,
+                            status = "No nearby device found. Tap Pair to try again.")
+                        updateTransport()
+                    }
                 }
-            }, DISCOVERY_WINDOW_MS)
+            }, (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
         } else {
             transport.stopDiscovery()
         }
@@ -821,6 +854,7 @@ class DeviceConnectManager @Inject constructor(
         connected = false
         authenticated = false
         syncEnabled = true
+        remoteOwnsPlayback = false
         acceptedUntrustedEndpoint = null
         pendingSecret = null
         sentPairingSecret = false
@@ -834,6 +868,19 @@ class DeviceConnectManager @Inject constructor(
         )
         remoteMirrorPlayer?.notifyStateChanged(previous, null)
         scheduleReconnect()
+        // A failed untrusted attempt should not strand both users in pairing mode.
+        // Nearby may cache the failed endpoint until discovery is restarted.
+        if (pairingMode && foreground && SystemClock.elapsedRealtime() < discoveryUntilMs) {
+            val generation = ++reconnectGeneration
+            handler.postDelayed({
+                if (generation == reconnectGeneration && pairingMode && foreground &&
+                    endpointId == null && SystemClock.elapsedRealtime() < discoveryUntilMs
+                ) {
+                    transport.stopDiscovery()
+                    updateTransport()
+                }
+            }, 1_500L)
+        }
     }
 
     private fun constantTimeEquals(a: String, b: String): Boolean =

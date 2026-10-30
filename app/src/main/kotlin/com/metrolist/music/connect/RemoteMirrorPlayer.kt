@@ -237,14 +237,47 @@ class RemoteMirrorPlayer(
 
     override fun clearMediaItems() = Unit
 
+    override fun setMediaItems(mediaItems: List<MediaItem>) =
+        connect.submitRemoteMediaItems(mediaItems, 0)
+
+    override fun setMediaItems(mediaItems: List<MediaItem>, resetPosition: Boolean) =
+        connect.submitRemoteMediaItems(mediaItems, if (resetPosition) 0 else currentMediaItemIndex)
+
+    override fun setMediaItems(mediaItems: List<MediaItem>, startIndex: Int, startPositionMs: Long) =
+        connect.submitRemoteMediaItems(mediaItems, startIndex)
+
+    override fun setMediaItem(mediaItem: MediaItem) = setMediaItems(listOf(mediaItem))
+
+    override fun setMediaItem(mediaItem: MediaItem, resetPosition: Boolean) =
+        setMediaItems(listOf(mediaItem), resetPosition)
+
+    override fun setMediaItem(mediaItem: MediaItem, startPositionMs: Long) =
+        setMediaItems(listOf(mediaItem))
+
+    override fun addMediaItems(mediaItems: List<MediaItem>) =
+        connect.submitRemoteQueueAddition(mediaItems, playNext = false)
+
+    override fun addMediaItems(index: Int, mediaItems: List<MediaItem>) =
+        connect.submitRemoteQueueAddition(mediaItems, playNext = index <= currentMediaItemIndex + 1)
+
+    override fun removeMediaItems(fromIndex: Int, toIndex: Int) {
+        for (index in (fromIndex until toIndex).reversed()) removeMediaItem(index)
+    }
+
+    override fun moveMediaItems(fromIndex: Int, toIndex: Int, newIndex: Int) = Unit
+
+    override fun replaceMediaItem(index: Int, mediaItem: MediaItem) = Unit
+
+    override fun replaceMediaItems(fromIndex: Int, toIndex: Int, mediaItems: List<MediaItem>) = Unit
+
     override fun removeMediaItem(index: Int) {
         val snapshot = remote ?: return
         connect.sendCommand("REMOVE_QUEUE", (snapshot.queueStartIndex + index).toLong())
     }
 
-    override fun addMediaItem(mediaItem: MediaItem) = Unit
+    override fun addMediaItem(mediaItem: MediaItem) = addMediaItems(listOf(mediaItem))
 
-    override fun addMediaItem(index: Int, mediaItem: MediaItem) = Unit
+    override fun addMediaItem(index: Int, mediaItem: MediaItem) = addMediaItems(index, listOf(mediaItem))
 
     override fun moveMediaItem(currentIndex: Int, newIndex: Int) {
         val start = remote?.queueStartIndex ?: return
