@@ -16,9 +16,7 @@ import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.pages.PlaylistPage
 import com.metrolist.innertube.utils.completed
 import com.metrolist.innertube.utils.parseCookieString
-import com.metrolist.lastfm.LastFM
 import com.metrolist.music.constants.InnerTubeCookieKey
-import com.metrolist.music.constants.LastFMUseSendLikes
 import com.metrolist.music.constants.LastFullSyncKey
 import com.metrolist.music.constants.SYNC_COOLDOWN
 import com.metrolist.music.db.MusicDatabase
@@ -134,7 +132,6 @@ internal fun preservedLocalSongs(
 ): List<PlaylistSongMap> {
     require(remoteIds.size == remoteSetVideoIds.size)
     val consumedRemote = BooleanArray(remoteIds.size)
-    val consumedLocal = BooleanArray(localSongs.size)
 
     // Confirmed rows claim the exact remote occurrence carrying their setVideoId.
     val remoteBySetVideoId = mutableMapOf<String, ArrayDeque<Int>>()
@@ -143,22 +140,33 @@ internal fun preservedLocalSongs(
             remoteBySetVideoId.getOrPut(setVideoId) { ArrayDeque() }.add(index)
         }
     }
-    localSongs.forEachIndexed { index, row ->
-        val claimed = row.setVideoId?.let { remoteBySetVideoId[it]?.removeFirstOrNull() }
-        if (claimed != null) {
-            consumedLocal[index] = true
-            consumedRemote[claimed] = true
+    for (row in localSongs) {
+        row.setVideoId?.let { remoteBySetVideoId[it]?.removeFirstOrNull() }
+            ?.let { claimed -> consumedRemote[claimed] = true }
+    }
+
+    // Count the remaining occurrences once instead of creating three
+    // intermediate lists of indexes and mapping them back to local rows.
+    val remainingBySongId = mutableMapOf<String, Int>()
+    remoteIds.forEachIndexed { index, songId ->
+        if (!consumedRemote[index]) {
+            remainingBySongId[songId] = (remainingBySongId[songId] ?: 0) + 1
         }
     }
 
-    // Only pending rows can survive. They match by songId against the leftover remote occurrences.
-    val pending = localSongs.indices.filter {
-        !consumedLocal[it] && localSongs[it].setVideoId == null
+    // A confirmed row (setVideoId != null) never survives a remote deletion.
+    // Pending rows consume unmatched occurrences, preserving duplicate semantics.
+    return buildList {
+        for (row in localSongs) {
+            if (row.setVideoId != null) continue
+            val count = remainingBySongId[row.songId] ?: 0
+            if (count == 0) {
+                add(row)
+            } else {
+                remainingBySongId[row.songId] = count - 1
+            }
+        }
     }
-    val remaining = remoteIds.indices.filterNot { consumedRemote[it] }.map(remoteIds::get)
-    return localSongIndexesAbsentFromRemote(pending.map { localSongs[it].songId }, remaining)
-        .map { pending[it] }
-        .map(localSongs::get)
 }
 
 /**
@@ -200,13 +208,15 @@ internal fun setVideoIdUpdatesForAddedSongs(
     if (addedSongIds.isEmpty() || remoteSongs.isEmpty() || localSongs.isEmpty()) return emptyList()
     val knownSetVideoIds = localSongs.mapNotNull { it.setVideoId }.toSet()
     val remoteById = remoteSongs.groupBy { it.id }
+    // Index all pending rows once; previously each added song scanned the
+    // entire local playlist again.
+    val pendingRowsById = localSongs.filter { it.setVideoId == null }.groupBy { it.songId }
     val updates = mutableListOf<PlaylistSongMap>()
     for ((songId, confirmedCount) in addedSongIds.groupingBy { it }.eachCount()) {
         val newRemoteSetVideoIds = remoteById[songId].orEmpty()
             .mapNotNull { it.setVideoId }
             .filter { it !in knownSetVideoIds }
-        val pendingRows = localSongs
-            .filter { it.songId == songId && it.setVideoId == null }
+        val pendingRows = pendingRowsById[songId].orEmpty()
             .sortedByDescending { it.position }
         if (newRemoteSetVideoIds.size != confirmedCount || pendingRows.size != confirmedCount) continue
         newRemoteSetVideoIds.asReversed()
@@ -234,7 +244,6 @@ class SyncUtils @Inject constructor(
     private val syncExecutionMutex = Mutex()
     private val queuedOperationKeys = ConcurrentHashMap.newKeySet<String>()
 
-    private var lastfmSendLikes = false
     @Volatile private var cachedLastSyncEpoch: Long = 0L
     private val playlistsBeingModified = ConcurrentHashMap<String, AtomicInteger>()
     private val playlistEditMutex = Mutex()
@@ -295,13 +304,6 @@ class SyncUtils @Inject constructor(
     }
 
     init {
-        context.dataStore.data
-            .map { it[LastFMUseSendLikes] ?: false }
-            .distinctUntilChanged()
-            .collectLatest(syncScope) {
-                lastfmSendLikes = it
-            }
-
         syncScope.launch {
             val loaded = context.dataStore.get(LastFullSyncKey, 0L)
             cachedLastSyncEpoch = maxOf(cachedLastSyncEpoch, loaded)
@@ -723,18 +725,6 @@ class SyncUtils @Inject constructor(
             Timber.e(e, "Failed to like song on YouTube: ${s.id}")
         }
 
-        if (lastfmSendLikes) {
-            try {
-                val dbSong = database.song(s.id).firstOrNull()
-                LastFM.setLoveStatus(
-                    artist = dbSong?.artists?.joinToString { a -> a.name } ?: "",
-                    track = s.title,
-                    love = s.liked
-                )
-            } catch (e: Exception) {
-                Timber.e(e, "Failed to update LastFM love status")
-            }
-        }
     }
 
     private suspend fun executeSubscribeChannel(channelId: String, subscribe: Boolean) = withContext(Dispatchers.IO) {

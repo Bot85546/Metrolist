@@ -97,6 +97,51 @@ class PlaylistSyncTest {
         SongItem(id = id, title = id, artists = emptyList(), thumbnail = "", setVideoId = setVideoId)
 
     @Test
+    fun `optimized pending preservation matches occurrence-based reference for duplicates`() {
+        // Deterministic randomized cases cover interleaved pending rows,
+        // confirmed copies, deleted-and-readded entries, and repeated IDs.
+        val random = kotlin.random.Random(20261029)
+        val ids = listOf("a", "b", "c")
+        val setIds = listOf<String?>(null, "set-a", "set-b", "set-c", "set-old")
+
+        repeat(500) { case ->
+            val local = (0 until random.nextInt(0, 12)).map { position ->
+                localMap(ids.random(random), position, setIds.random(random))
+            }
+            val remoteIds = (0 until random.nextInt(0, 12)).map { ids.random(random) }
+            val remoteSetIds = remoteIds.map { setIds.random(random) }
+
+            // Reference implementation deliberately mirrors the original
+            // occurrence-by-occurrence algorithm, independent of the new code.
+            val claimedRemote = BooleanArray(remoteIds.size)
+            val claimedLocal = BooleanArray(local.size)
+            val remoteBySetId = mutableMapOf<String, ArrayDeque<Int>>()
+            remoteIds.indices.forEach { index ->
+                remoteSetIds[index]?.let { setId ->
+                    remoteBySetId.getOrPut(setId) { ArrayDeque() }.add(index)
+                }
+            }
+            local.forEachIndexed { index, row ->
+                val claimed = row.setVideoId?.let { remoteBySetId[it]?.removeFirstOrNull() }
+                if (claimed != null) {
+                    claimedLocal[index] = true
+                    claimedRemote[claimed] = true
+                }
+            }
+            val pending = local.indices.filter { !claimedLocal[it] && local[it].setVideoId == null }
+            val remaining = remoteIds.indices.filterNot { claimedRemote[it] }.map(remoteIds::get)
+            val expected = localSongIndexesAbsentFromRemote(pending.map { local[it].songId }, remaining)
+                .map { local[pending[it]] }
+
+            assertEquals(
+                "Mismatch in deterministic playlist fixture #$case",
+                expected,
+                preservedLocalSongs(local, remoteIds, remoteSetIds),
+            )
+        }
+    }
+
+    @Test
     fun `backfill fills null setVideoIds positionally`() {
         assertEquals(
             listOf(localMap("a", 0, "set-a")),

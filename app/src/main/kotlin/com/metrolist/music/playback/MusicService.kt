@@ -7,6 +7,7 @@
 
 package com.metrolist.music.playback
 
+import kotlin.math.roundToInt
 import android.app.ForegroundServiceStartNotAllowedException
 import android.app.Notification
 import android.app.NotificationChannel
@@ -19,6 +20,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.database.SQLException
+import android.os.PowerManager
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
@@ -32,7 +34,6 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.PowerManager
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.datastore.preferences.core.Preferences
@@ -44,7 +45,6 @@ import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
-import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.Player.EVENT_POSITION_DISCONTINUITY
 import androidx.media3.common.Player.EVENT_TIMELINE_CHANGED
@@ -98,7 +98,6 @@ import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.WatchEndpoint
 import com.metrolist.innertubex.extraction.ContentHints
-import com.metrolist.lastfm.LastFM
 import com.metrolist.music.MainActivity
 import com.metrolist.music.R
 import com.metrolist.music.constants.AddToPlaylistPosition
@@ -116,31 +115,10 @@ import com.metrolist.music.constants.CrossfadeDurationKey
 import com.metrolist.music.constants.CrossfadeEnabledKey
 import com.metrolist.music.constants.CrossfadeGaplessKey
 import com.metrolist.music.constants.DisableLoadMoreWhenRepeatAllKey
-import com.metrolist.music.constants.DiscordActivityNameKey
-import com.metrolist.music.constants.DiscordActivityTypeKey
-import com.metrolist.music.constants.DiscordAdvancedModeKey
-import com.metrolist.music.constants.DiscordButton1EnabledKey
-import com.metrolist.music.constants.DiscordButton1LabelKey
-import com.metrolist.music.constants.DiscordButton1UrlKey
-import com.metrolist.music.constants.DiscordButton2EnabledKey
-import com.metrolist.music.constants.DiscordButton2LabelKey
-import com.metrolist.music.constants.DiscordButton2UrlKey
-import com.metrolist.music.constants.DiscordDetailsTemplateKey
-import com.metrolist.music.constants.DiscordStateTemplateKey
-import com.metrolist.music.constants.DiscordUserStatusKey
-import com.metrolist.music.constants.EnableDiscordRPCKey
-import com.metrolist.music.discord.DiscordActivity
-import com.metrolist.music.discord.DiscordDefaults
-import com.metrolist.music.discord.DiscordRpcManager
-import com.metrolist.music.discord.DiscordActivityBuilder
-import com.metrolist.music.discord.DiscordTemplateRenderer
-import com.metrolist.music.discord.PresenceStatus
-import com.metrolist.music.constants.EnableLastFMScrobblingKey
 import com.metrolist.music.constants.EnableSongCacheKey
 import com.metrolist.music.constants.HideExplicitKey
 import com.metrolist.music.constants.HideVideoSongsKey
 import com.metrolist.music.constants.HistoryDuration
-import com.metrolist.music.constants.LastFMUseNowPlaying
 import com.metrolist.music.constants.MediaSessionConstants
 import com.metrolist.music.constants.MediaSessionConstants.CommandAddToTargetPlaylist
 import com.metrolist.music.constants.MediaSessionConstants.CommandToggleLike
@@ -156,9 +134,6 @@ import com.metrolist.music.constants.PreventDuplicateTracksInQueueKey
 import com.metrolist.music.constants.RememberShuffleAndRepeatKey
 import com.metrolist.music.constants.RepeatModeKey
 import com.metrolist.music.constants.ResumeOnBluetoothConnectKey
-import com.metrolist.music.constants.ScrobbleDelayPercentKey
-import com.metrolist.music.constants.ScrobbleDelaySecondsKey
-import com.metrolist.music.constants.ScrobbleMinSongDurationKey
 import com.metrolist.music.constants.ShowLyricsKey
 import com.metrolist.music.constants.ShuffleModeKey
 import com.metrolist.music.constants.ShufflePlaylistFirstKey
@@ -175,9 +150,6 @@ import com.metrolist.music.db.entities.RelatedSongMap
 import com.metrolist.music.db.entities.Song
 import com.metrolist.music.di.DownloadCache
 import com.metrolist.music.di.PlayerCache
-import com.metrolist.music.eq.EqualizerService
-import com.metrolist.music.eq.audio.CustomEqualizerAudioProcessor
-import com.metrolist.music.eq.data.EQProfileRepository
 import com.metrolist.music.extensions.SilentHandler
 import com.metrolist.music.extensions.collect
 import com.metrolist.music.extensions.collectLatest
@@ -194,8 +166,6 @@ import com.metrolist.music.lyrics.LyricsHelper
 import com.metrolist.music.models.PersistPlayerState
 import com.metrolist.music.models.PersistQueue
 import com.metrolist.music.models.toMediaMetadata
-import com.metrolist.music.playback.alarm.MusicAlarmScheduler
-import com.metrolist.music.playback.alarm.MusicAlarmStore
 import com.metrolist.music.playback.audio.SilenceDetectorAudioProcessor
 import com.metrolist.music.playback.queues.EmptyQueue
 import com.metrolist.music.playback.queues.ListQueue
@@ -208,7 +178,6 @@ import com.metrolist.music.constants.LoudnessLevel
 import com.metrolist.music.constants.LoudnessLevelKey
 import com.metrolist.music.utils.CoilBitmapLoader
 import com.metrolist.music.utils.NetworkConnectivityObserver
-import com.metrolist.music.utils.ScrobbleManager
 import com.metrolist.music.utils.SyncUtils
 import com.metrolist.music.utils.getArtistSeparator
 import com.metrolist.music.utils.joinToArtistString
@@ -254,7 +223,6 @@ import java.io.ObjectInputStream
 import java.io.ObjectOutputStream
 import java.time.LocalDateTime
 import javax.inject.Inject
-import kotlin.random.Random
 import java.util.Collections
 
 private const val INSTANT_SILENCE_SKIP_STEP_MS = 15_000L
@@ -285,12 +253,6 @@ class MusicService :
 
     @Inject
     lateinit var mediaLibrarySessionCallback: MediaLibrarySessionCallback
-
-    @Inject
-    lateinit var equalizerService: EqualizerService
-
-    @Inject
-    lateinit var eqProfileRepository: EQProfileRepository
 
     @Inject
     lateinit var widgetManager: MetrolistWidgetManager
@@ -352,11 +314,6 @@ class MusicService :
             .flatMapLatest { mediaMetadata ->
                 database.song(mediaMetadata?.id)
             }.stateIn(scope, SharingStarted.Lazily, null)
-    private val currentFormat =
-        currentMediaMetadata.flatMapLatest { mediaMetadata ->
-            database.format(mediaMetadata?.id)
-        }
-
     lateinit var playerVolume: MutableStateFlow<Float>
     val isMuted = MutableStateFlow(false)
     private val sleepTimerVolumeMultiplier = MutableStateFlow(1f)
@@ -407,7 +364,11 @@ class MusicService :
     private var taskCleared = false
     private var lastSavedPlayerState: PersistPlayerState? = null
     private var mediaSession: MediaLibrarySession? = null
+    private val sessionArtworkLoader by lazy { CoilBitmapLoader(this, scope) }
+    private var portableArtworkJob: Job? = null
+    private var portableArtworkReplacementId: String? = null
     private var controllerFuture: com.google.common.util.concurrent.ListenableFuture<MediaController>? = null
+    private var foregroundRequestedForPlayback = false
 
     private val playerInitialized = MutableStateFlow(false)
     val isPlayerReady: kotlinx.coroutines.flow.StateFlow<Boolean> = playerInitialized.asStateFlow()
@@ -429,10 +390,9 @@ class MusicService :
     private var openedAudioEffectSessionId: Int = C.AUDIO_SESSION_ID_UNSET
     private val historyReporters = HashMap<Player, YouTubeHistoryReporter>()
     private val playerNormalizationProcessors = HashMap<Player, VolumeNormalizationAudioProcessor>()
-    private val playerEqualizerProcessors = HashMap<Player, CustomEqualizerAudioProcessor>()
-
-    private var loudnessSetupJob: Job? = null
-    private var loudnessSetupGeneration: Long = 0L
+    // The stream resolver records loudness for both active and prebuffered tracks.
+    // Player changes must not require another database round-trip for the gain.
+    private val trackLoudnessCache = TrackLoudnessCache()
 
     @Volatile
     private var normalizationEnabledCached: Boolean = false
@@ -440,39 +400,10 @@ class MusicService :
     @Volatile
     private var loudnessLevelCached: LoudnessLevel = LoudnessLevel.BALANCED
 
-    private var cachedNormalizationMediaId: String? = null
-    private var cachedNormalizationGainMb: Int? = null
-    private var cachedNormalizationEnabled: Boolean = false
-
-    @Volatile private var discordRpcEnabled = false
-    @Volatile private var lastDiscordReconnectAttemptAtMs: Long = 0L
-    @Volatile private var discordIntentionalDisconnect = false
     @Volatile private var isScreenOff = false
-    private val screenOffHandler = Handler(Looper.getMainLooper())
-    private val screenOffTimeout = Runnable {
-        Timber.tag("DiscordSvc").i("screenOffTimeout: isPlaying=%s, isReady=%s",
-            player.isPlaying, DiscordRpcManager.isReady())
-        if (!player.isPlaying && DiscordRpcManager.isReady()) {
-            Timber.tag("DiscordSvc").i("screenOffTimeout: disconnecting after long idle")
-            discordIntentionalDisconnect = true
-            DiscordRpcManager.disconnect()
-        }
-    }
-    private val pauseTimeout = Runnable {
-        Timber.tag("DiscordSvc").i("pauseTimeout: isPlaying=%s, isReady=%s",
-            player.isPlaying, DiscordRpcManager.isReady())
-        if (!player.isPlaying && DiscordRpcManager.isReady()) {
-            Timber.tag("DiscordSvc").i("pauseTimeout: disconnecting after 1m paused")
-            discordIntentionalDisconnect = true
-            DiscordRpcManager.disconnect()
-        }
-    }
-    private var lastPlaybackSpeed = 1.0f
 
     @Volatile
     private var latestMediaNotification: Notification? = null
-
-    private var scrobbleManager: ScrobbleManager? = null
 
     val automixItems = MutableStateFlow<List<MediaItem>>(emptyList())
 
@@ -556,9 +487,6 @@ class MusicService :
                     Intent.ACTION_SCREEN_OFF -> {
                         isScreenOff = true
                         stopWidgetUpdates()
-                        Timber.tag("DiscordSvc").i("SCREEN_OFF: cancelling pause timeout, delaying disconnect 10m")
-                        screenOffHandler.removeCallbacks(pauseTimeout)
-                        screenOffHandler.postDelayed(screenOffTimeout, 600_000)
                     }
 
                     Intent.ACTION_SCREEN_ON -> {
@@ -566,11 +494,6 @@ class MusicService :
                         if (::player.isInitialized && player.isPlaying) {
                             startWidgetUpdates()
                         }
-                        Timber.tag("DiscordSvc").i("SCREEN_ON: removing disconnect delay")
-                        screenOffHandler.removeCallbacks(screenOffTimeout)
-                        screenOffHandler.removeCallbacks(pauseTimeout)
-                        discordIntentionalDisconnect = false
-                        syncDiscordState()
                     }
                 }
             }
@@ -611,24 +534,20 @@ class MusicService :
 
         playerInitialized.value = false
 
-        // Call startForeground() as early as possible to satisfy the
-        // 5-second timeout imposed by Context.startForegroundService().
-        // On some OEMs (e.g. MIUI), even a DataStore read can be slow
-        // enough to miss the window, so we promote before any I/O.
-        ensureForegroundChannelExists()
-        if (!ensureStartedAsForegroundOrStop()) {
-            return
-        }
+        // Bound-only service creation should not display an empty notification.
+        // Media3 promotes the session when playback begins; media-button
+        // foreground starts are handled by onStartCommand().
 
         // Read ALL startup preferences in one shot so that subsequent code
         // never calls dataStore.get() (which does runBlocking internally).
         // This consolidates ~15 main-thread-blocking DataStore reads into 1.
         startupPrefs = runBlocking(Dispatchers.IO) { dataStore.data.first() }
+        isScreenOff = getSystemService<PowerManager>()?.isInteractive == false
         historyPaused = startupPrefs!![PauseListenHistoryKey] ?: false
         historyDurationMs = ((startupPrefs!![HistoryDuration] ?: 30f) * 1000).toLong()
 
-        // 3. Connect the processor to the service
-        // handled in createExoPlayer
+        // The player is created without an idle foreground notification.
+        // Playback itself activates the controller and foreground state.
 
         seedLoudnessCacheFromPrefs()
 
@@ -709,7 +628,7 @@ class MusicService :
                         Intent(this, MainActivity::class.java),
                         PendingIntent.FLAG_IMMUTABLE,
                     ),
-                ).setBitmapLoader(CoilBitmapLoader(this, scope))
+                ).setBitmapLoader(sessionArtworkLoader)
                 .build()
         player.repeatMode = startupPrefs!![RepeatModeKey] ?: REPEAT_MODE_OFF
 
@@ -717,23 +636,9 @@ class MusicService :
             player.shuffleModeEnabled = startupPrefs!![ShuffleModeKey] ?: false
         }
 
-        // Keep a connected controller so that notification works
-        val sessionToken = SessionToken(this, ComponentName(this, MusicService::class.java))
-        controllerFuture = MediaController.Builder(this, sessionToken).buildAsync()
-        controllerFuture?.addListener({
-            try {
-                controllerFuture?.get()
-            } catch (e: Exception) {
-                Timber.tag(TAG).e(e, "Failed to initialize MediaController")
-                controllerFuture = null
-                stopSelf()
-            }
-        }, MoreExecutors.directExecutor())
-
         connectivityManager = getSystemService()!!
         connectivityObserver = NetworkConnectivityObserver(this)
 
-        isScreenOff = getSystemService<PowerManager>()?.isInteractive == false
         val screenStateFilter =
             IntentFilter().apply {
                 addAction(Intent.ACTION_SCREEN_ON)
@@ -754,33 +659,11 @@ class MusicService :
         // Collecting this flow activates the internal map that updates lyricsProviders in LyricsHelper
         lyricsHelper.preferred.collectLatest(scope) {}
 
-        // 4. Watch for EQ profile changes
-        scope.launch {
-            eqProfileRepository.activeProfile.collect { profile ->
-                if (profile != null) {
-                    val result = equalizerService.applyProfile(profile)
-                    if (result.isSuccess && player.playbackState == Player.STATE_READY && player.isPlaying) {
-                        // Instant update: flush buffers and seek slightly to re-process audio
-                        player.seekTo(player.currentPosition)
-                    }
-                } else {
-                    equalizerService.disable()
-                    if (player.playbackState == Player.STATE_READY && player.isPlaying) {
-                        player.seekTo(player.currentPosition)
-                    }
-                }
-            }
-        }
-
         scope.launch {
             connectivityObserver.networkStatus.collect { isConnected ->
                 isNetworkConnected.value = isConnected
                 if (isConnected && waitingForNetworkConnection.value) {
                     triggerRetry()
-                }
-                if (isConnected && DiscordRpcManager.isReady()) {
-                    Timber.tag("DiscordSvc").i("Network reconnected, syncing RPC")
-                    syncDiscordState()
                 }
             }
         }
@@ -914,28 +797,36 @@ class MusicService :
                 }
             }
 
-        combine(
-            currentFormat,
-            dataStore.data
-                .map { it[AudioNormalizationKey] ?: true }
-                .distinctUntilChanged(),
-            dataStore.data
-                .map { prefs -> prefs[LoudnessLevelKey].toEnum(LoudnessLevel.BALANCED) }
-                .distinctUntilChanged(),
-        ) { format, normalizeAudio, loudnessLevel ->
-            Triple(format, normalizeAudio, loudnessLevel)
-        }.collectLatest(scope) { (_, normalizeAudio, loudnessLevel) ->
-            normalizationEnabledCached = normalizeAudio
-            loudnessLevelCached = loudnessLevel
-            setupAudioNormalization()
-        }
+        dataStore.data
+            .map { prefs ->
+                (prefs[AudioNormalizationKey] ?: true) to
+                    prefs[LoudnessLevelKey].toEnum(LoudnessLevel.BALANCED)
+            }
+            .distinctUntilChanged()
+            .collectLatest(scope) { (normalizeAudio, loudnessLevel) ->
+                // Initial preferences were already loaded before player creation.
+                // Reapplying an identical initial emission can cause a needless
+                // normalization update while the first song is starting.
+                if (normalizeAudio == normalizationEnabledCached &&
+                    loudnessLevel == loudnessLevelCached
+                ) {
+                    return@collectLatest
+                }
+                normalizationEnabledCached = normalizeAudio
+                loudnessLevelCached = loudnessLevel
+                // Recompute only for actual user changes, not database updates.
+                // The audio processor smooths any gain change during playback.
+                applyPreparedAudioNormalizationNow()
+            }
 
         combine(
-            dataStore.data.map { it[AudioOffload] ?: false },
-            dataStore.data.map { it[CrossfadeEnabledKey] ?: false },
-        ) { offloadPref, crossfadeEnabled ->
-            // Force disable offload if crossfade is enabled to prevent volume ramp issues
-            if (crossfadeEnabled) false else offloadPref
+            dataStore.data.map { it[AudioOffload] ?: false }.distinctUntilChanged(),
+            dataStore.data.map { it[CrossfadeEnabledKey] ?: false }.distinctUntilChanged(),
+            dataStore.data.map { it[AudioNormalizationKey] ?: true }.distinctUntilChanged(),
+        ) { offloadPref, crossfadeEnabled, normalizeAudio ->
+            // Audio offload bypasses Media3's PCM AudioProcessorChain. Never
+            // let a supported codec silently skip our normalization gain.
+            shouldEnableAudioOffload(offloadPref, crossfadeEnabled, normalizeAudio)
         }.distinctUntilChanged()
             .collectLatest(scope) { useOffload ->
                 player.setOffloadEnabled(useOffload)
@@ -1004,145 +895,6 @@ class MusicService :
                 _playerFlow.value = newPlayer
 
                 Timber.tag("MusicService").i("Player recreated with AudioTrackPlaybackParams: $useAudioTrackParams")
-            }
-
-        // Initialize Discord RPC manager (rehydrates token, reconnects gateway)
-        if (!DiscordRpcManager.isInitialized()) {
-            DiscordRpcManager.init(this@MusicService)
-        }
-
-        dataStore.data
-            .map { it[EnableDiscordRPCKey] ?: true }
-            .debounce(300)
-            .distinctUntilChanged()
-            .collect(scope) { enabled ->
-                Timber.tag("DiscordSvc").i("RPC toggle: enabled=%s, isReady=%s, hasToken=%s",
-                    enabled, DiscordRpcManager.isReady(), DiscordRpcManager.getAccessToken() != null)
-                discordRpcEnabled = enabled
-                if (enabled) {
-                    discordIntentionalDisconnect = false
-                    if (DiscordRpcManager.isReady()) {
-                        Timber.tag("DiscordSvc").i("RPC toggle: already ready, syncing RPC")
-                        syncDiscordState()
-                    } else if (DiscordRpcManager.getAccessToken() != null) {
-                        Timber.tag("DiscordSvc").i("RPC toggle: not ready but has token, reconnecting")
-                        scope.launch(Dispatchers.IO) {
-                            if (!DiscordRpcManager.isInitialized()) {
-                                Timber.tag("DiscordSvc").i("RPC toggle: initializing")
-                                DiscordRpcManager.init(this@MusicService)
-                            }
-                            DiscordRpcManager.reconnectWithToken(DiscordRpcManager.getAccessToken()!!)
-                        }
-                    } else {
-                        Timber.tag("DiscordSvc").w("RPC toggle: enabled but no token and not ready")
-                    }
-                } else if (DiscordRpcManager.isReady()) {
-                    Timber.tag("DiscordSvc").i("RPC toggle: disabled, disconnecting")
-                    scope.launch(Dispatchers.IO) {
-                        DiscordRpcManager.disconnect()
-                    }
-                }
-            }
-
-        DiscordRpcManager.accessTokenFlow.collectLatest(scope) { token ->
-                Timber.tag("DiscordSvc").i("Token change: hasToken=%s, initialized=%s, authorized=%s, enabled=%s",
-                    token != null, DiscordRpcManager.isInitialized(), DiscordRpcManager.isAuthorized(), discordRpcEnabled)
-                if (token == null) {
-                    if (DiscordRpcManager.isReady()) {
-                        Timber.tag("DiscordSvc").i("Token change: empty token, disconnecting")
-                        DiscordRpcManager.disconnect()
-                    }
-                    return@collectLatest
-                }
-                if (!discordRpcEnabled) {
-                    Timber.tag("DiscordSvc").i("Token change: RPC disabled, skipping reconnect")
-                    return@collectLatest
-                }
-                if (!DiscordRpcManager.isInitialized()) {
-                    Timber.tag("DiscordSvc").i("Token change: initializing")
-                    DiscordRpcManager.init(this@MusicService)
-                }
-                if (!DiscordRpcManager.isAuthorized()) {
-                    Timber.tag("DiscordSvc").i("Token change: reconnecting with token")
-                    DiscordRpcManager.reconnectWithToken(token)
-                } else {
-                    Timber.tag("DiscordSvc").i("Token change: already authorized, skipping reconnect")
-                }
-            }
-
-        scope.launch {
-            DiscordRpcManager.connectionStatus.collect { status ->
-                Timber.tag("DiscordSvc").i("Status change: %s (discordRpcEnabled=%s, playing=%s)",
-                    status, discordRpcEnabled, player.isPlaying)
-                if (status == DiscordRpcManager.Status.Connected && discordRpcEnabled) {
-                    Timber.tag("DiscordSvc").i("Status change: connected, syncing RPC")
-                    syncDiscordState()
-                }
-            }
-        }
-
-        scope.launch {
-            DiscordRpcManager.settingsChanged.collect {
-                if (discordRpcEnabled && DiscordRpcManager.isReady()) {
-                    Timber.tag("DiscordSvc").i("Settings changed, syncing RPC")
-                    syncDiscordState()
-                }
-            }
-        }
-
-        scope.launch {
-            while (isActive) {
-                delay(5_000)
-                Timber.tag("DiscordSvc").v("polling: periodic syncDiscordState tick")
-                syncDiscordState()
-            }
-        }
-
-        dataStore.data
-            .map { it[EnableLastFMScrobblingKey] ?: false }
-            .debounce(300)
-            .distinctUntilChanged()
-            .collect(scope) { enabled ->
-                if (enabled && scrobbleManager == null) {
-                    val delayPercent = dataStore.get(ScrobbleDelayPercentKey, LastFM.DEFAULT_SCROBBLE_DELAY_PERCENT)
-                    val minSongDuration =
-                        dataStore.get(ScrobbleMinSongDurationKey, LastFM.DEFAULT_SCROBBLE_MIN_SONG_DURATION)
-                    val delaySeconds = dataStore.get(ScrobbleDelaySecondsKey, LastFM.DEFAULT_SCROBBLE_DELAY_SECONDS)
-                    scrobbleManager =
-                        ScrobbleManager(
-                            scope,
-                            minSongDuration = minSongDuration,
-                            scrobbleDelayPercent = delayPercent,
-                            scrobbleDelaySeconds = delaySeconds,
-                        )
-                    scrobbleManager?.useNowPlaying = dataStore.get(LastFMUseNowPlaying, false)
-                } else if (!enabled && scrobbleManager != null) {
-                    scrobbleManager?.destroy()
-                    scrobbleManager = null
-                }
-            }
-
-        dataStore.data
-            .map { it[LastFMUseNowPlaying] ?: false }
-            .distinctUntilChanged()
-            .collectLatest(scope) {
-                scrobbleManager?.useNowPlaying = it
-            }
-
-        dataStore.data
-            .map { prefs ->
-                Triple(
-                    prefs[ScrobbleDelayPercentKey] ?: LastFM.DEFAULT_SCROBBLE_DELAY_PERCENT,
-                    prefs[ScrobbleMinSongDurationKey] ?: LastFM.DEFAULT_SCROBBLE_MIN_SONG_DURATION,
-                    prefs[ScrobbleDelaySecondsKey] ?: LastFM.DEFAULT_SCROBBLE_DELAY_SECONDS,
-                )
-            }.distinctUntilChanged()
-            .collect(scope) { (delayPercent, minSongDuration, delaySeconds) ->
-                scrobbleManager?.let {
-                    it.scrobbleDelayPercent = delayPercent
-                    it.minSongDuration = minSongDuration
-                    it.scrobbleDelaySeconds = delaySeconds
-                }
             }
 
         combine(
@@ -1292,8 +1044,7 @@ class MusicService :
 
     private fun createExoPlayer(prefs: Preferences? = null): ExoPlayer {
         val normalizationProcessor = VolumeNormalizationAudioProcessor()
-        val eqProcessor = CustomEqualizerAudioProcessor()
-
+        applyAudioNormalization(normalizationProcessor, null, null, immediate = true)
         val silenceProcessor = SilenceDetectorAudioProcessor { handleLongSilenceDetected() }
 
         // Set initial state — use pre-read prefs when available, otherwise fall back to DataStore
@@ -1318,7 +1069,7 @@ class MusicService :
                 .setMediaSourceFactory(
                     createMediaSourceFactory(normalizationProcessor) { createdPlayer },
                 )
-                .setRenderersFactory(createRenderersFactory(normalizationProcessor, eqProcessor, silenceProcessor, useAudioTrackPlaybackParams))
+                .setRenderersFactory(createRenderersFactory(normalizationProcessor, silenceProcessor, useAudioTrackPlaybackParams))
                 .setLoadControl(
                     // Start playback once ~750ms is buffered (media3's default is 1000ms) so first
                     // audio is audible a touch sooner. min/max/after-rebuffer match the media3 1.x
@@ -1345,23 +1096,19 @@ class MusicService :
 
         playerNormalizationProcessors[player] = normalizationProcessor
         playerSilenceProcessors[player] = silenceProcessor
-        playerEqualizerProcessors[player] = eqProcessor
-        equalizerService.addAudioProcessor(eqProcessor)
-
         if (prefs != null) {
             val offload = prefs[AudioOffload] ?: false
             val crossfade = prefs[CrossfadeEnabledKey] ?: false
-            player.setOffloadEnabled(if (crossfade) false else offload)
+            val normalizeAudio = prefs[AudioNormalizationKey] ?: true
+            player.setOffloadEnabled(shouldEnableAudioOffload(offload, crossfade, normalizeAudio))
             player.skipSilenceEnabled = prefs[SkipSilenceKey] ?: false
         } else {
-            player.apply {
-                runBlocking {
-                    val offload = dataStore.get(AudioOffload, false)
-                    val crossfade = dataStore.get(CrossfadeEnabledKey, false)
-                    setOffloadEnabled(if (crossfade) false else offload)
-                    skipSilenceEnabled = dataStore.get(SkipSilenceKey, false)
-                }
-            }
+            val currentPrefs = runBlocking(Dispatchers.IO) { dataStore.data.first() }
+            val offload = currentPrefs[AudioOffload] ?: false
+            val crossfade = currentPrefs[CrossfadeEnabledKey] ?: false
+            val normalizeAudio = currentPrefs[AudioNormalizationKey] ?: true
+            player.setOffloadEnabled(shouldEnableAudioOffload(offload, crossfade, normalizeAudio))
+            player.skipSilenceEnabled = currentPrefs[SkipSilenceKey] ?: false
         }
         val historyReporter = YouTubeHistoryReporter(
             player = player,
@@ -2292,52 +2039,61 @@ class MusicService :
         )
     }
 
+
     private fun applyCachedAudioNormalizationNow() {
         if (isCrossfading) return
+        applyPreparedAudioNormalizationNow()
+    }
+
+    /**
+     * Runs on the service/player thread at a media-item transition, before
+     * another asynchronous database lookup would have completed. If the next
+     * item was prebuffered, its stream resolver has already recorded metadata.
+     *
+     * When metadata is missing, clear the previous track's gain immediately;
+     * the resolver will apply the new track's gain before providing its audio
+     * bytes, if loudness data becomes available.
+     */
+    private fun applyPreparedAudioNormalizationNow(immediate: Boolean = false) {
+        if (!::player.isInitialized) return
         val processor = playerNormalizationProcessors[player] ?: return
-        try {
-            val gain = cachedNormalizationGainMb
-            if (cachedNormalizationMediaId == player.currentMediaItem?.mediaId &&
-                cachedNormalizationEnabled &&
-                gain != null
-            ) {
-                processor.setTargetGain(gain)
-                processor.enabled = true
-            } else {
-                processor.enabled = false
-            }
-        } catch (e: Exception) {
-            reportException(e)
-            processor.enabled = false
-        }
+        val mediaId = player.currentMediaItem?.mediaId
+        val loudness = mediaId?.let(trackLoudnessCache::get)
+        applyAudioNormalization(
+            processor = processor,
+            loudnessDb = loudness?.loudnessDb,
+            perceptualLoudnessDb = loudness?.perceptualLoudnessDb,
+            relativeReferenceLufs = mediaId?.let(trackLoudnessCache::referenceFor),
+            immediate = immediate,
+        )
     }
 
     private fun applyAudioNormalization(
         processor: VolumeNormalizationAudioProcessor,
-        mediaId: String,
         loudnessDb: Double?,
         perceptualLoudnessDb: Double?,
-        updateCache: Boolean,
+        relativeReferenceLufs: Double? = null,
+        immediate: Boolean = false,
     ) {
         val gain =
             if (normalizationEnabledCached) {
-                normalizationGainMb(loudnessDb, perceptualLoudnessDb, loudnessLevelCached.targetLufs)
+                normalizationGainMb(
+                    loudnessDb,
+                    perceptualLoudnessDb,
+                    loudnessLevelCached.targetLufs,
+                    relativeReferenceLufs,
+                )
+                    ?: fallbackNormalizationGainMb(loudnessLevelCached.targetLufs)
             } else {
                 null
             }
 
         if (gain != null) {
-            processor.setTargetGain(gain)
+            processor.setTargetGain(gain, immediate = immediate)
             processor.enabled = true
         } else {
-            processor.setTargetGain(0)
+            processor.setTargetGain(0, immediate = immediate)
             processor.enabled = false
-        }
-
-        if (updateCache) {
-            cachedNormalizationMediaId = mediaId
-            cachedNormalizationGainMb = gain
-            cachedNormalizationEnabled = gain != null
         }
     }
 
@@ -2347,87 +2103,37 @@ class MusicService :
         mediaId: String,
         loudnessDb: Double?,
         perceptualLoudnessDb: Double?,
-        preserveCachedIfMissing: Boolean = false,
-    ) = runBlocking(Dispatchers.Main.immediate) {
-        val targetPlayer = playerProvider() ?: return@runBlocking
-        if (playerNormalizationProcessors[targetPlayer] !== processor ||
-            targetPlayer.currentMediaItem?.mediaId != mediaId
-        ) {
-            return@runBlocking
-        }
+        clientName: String? = null,
+    ) {
+        // Always record metadata, including for preloaded media items which
+        // are not yet the player's currentMediaItem. Never change the active
+        // processor just because a future song is being buffered.
+        trackLoudnessCache.record(mediaId, loudnessDb, perceptualLoudnessDb, clientName)
+        // Missing metadata does not justify a main-thread round trip. If a
+        // stream response contains usable measurements, this method is called
+        // again before the newly resolved stream is handed to the player.
+        val prepared = trackLoudnessCache.get(mediaId) ?: return
 
-        val isCurrentPlayer = ::player.isInitialized && targetPlayer === player
-        if (preserveCachedIfMissing &&
-            loudnessDb == null &&
-            perceptualLoudnessDb == null &&
-            isCurrentPlayer &&
-            cachedNormalizationMediaId == mediaId
-        ) {
-            return@runBlocking
-        }
-        if (isCurrentPlayer) {
-            loudnessSetupGeneration++
-            loudnessSetupJob?.cancel()
-            loudnessSetupJob = null
-        }
-        applyAudioNormalization(
-            processor = processor,
-            mediaId = mediaId,
-            loudnessDb = loudnessDb,
-            perceptualLoudnessDb = perceptualLoudnessDb,
-            updateCache = isCurrentPlayer,
-        )
-    }
-
-    private fun setupAudioNormalization() {
-        val requestGeneration = ++loudnessSetupGeneration
-        loudnessSetupJob?.cancel()
-
-        loudnessSetupJob = scope.launch {
-            try {
-                val currentMediaId = withContext(Dispatchers.Main) {
-                    player.currentMediaItem?.mediaId
-                }
-
-                val normalizeAudio = normalizationEnabledCached
-
-                if (normalizeAudio && currentMediaId != null) {
-                    val format = withContext(Dispatchers.IO) {
-                        database.format(currentMediaId).first()
-                    }
-
-                    Timber.tag(TAG).d("Audio normalization enabled: $normalizeAudio")
-
-                    withContext(Dispatchers.Main) {
-                        if (!isActive || requestGeneration != loudnessSetupGeneration) return@withContext
-                        if (player.currentMediaItem?.mediaId != currentMediaId) return@withContext
-
-                        val processor = playerNormalizationProcessors[player] ?: return@withContext
-                        if (format != null || cachedNormalizationMediaId != currentMediaId) {
-                            applyAudioNormalization(
-                                processor = processor,
-                                mediaId = currentMediaId,
-                                loudnessDb = format?.loudnessDb,
-                                perceptualLoudnessDb = format?.perceptualLoudnessDb,
-                                updateCache = true,
-                            )
-                        }
-                    }
-                } else {
-                    withContext(Dispatchers.Main) {
-                        if (!isActive || requestGeneration != loudnessSetupGeneration) return@withContext
-                        cachedNormalizationMediaId = null
-                        cachedNormalizationGainMb = null
-                        cachedNormalizationEnabled = false
-                        playerNormalizationProcessors.values.forEach { it.enabled = false }
-                    }
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                reportException(e)
-                playerNormalizationProcessors.values.forEach { it.enabled = false }
+        // The data-source resolver runs before it hands audio bytes to
+        // ExoPlayer. Apply a current track's gain synchronously here rather
+        // than scheduling a database-driven correction during playback.
+        runBlocking(Dispatchers.Main.immediate) {
+            val targetPlayer = playerProvider() ?: return@runBlocking
+            if (playerNormalizationProcessors[targetPlayer] !== processor ||
+                targetPlayer.currentMediaItem?.mediaId != mediaId
+            ) {
+                return@runBlocking
             }
+
+            applyAudioNormalization(
+                processor = processor,
+                loudnessDb = prepared.loudnessDb,
+                perceptualLoudnessDb = prepared.perceptualLoudnessDb,
+                relativeReferenceLufs = trackLoudnessCache.referenceFor(mediaId),
+                // Existing playback gets a short correction ramp; loading a
+                // newly selected track must begin at the prepared gain.
+                immediate = !targetPlayer.isPlaying || targetPlayer.currentPosition <= 100L,
+            )
         }
     }
 
@@ -2459,10 +2165,6 @@ class MusicService :
 
     private fun closeAudioEffectSession(sessionIdOverride: Int? = null, clearNormalizationCache: Boolean = true) {
         val sessionIdToClose = sessionIdOverride ?: openedAudioEffectSessionId
-
-        loudnessSetupGeneration++
-        loudnessSetupJob?.cancel()
-        loudnessSetupJob = null
 
         // Guard: only release/reset state if closing the currently active session
         val isClosingCurrentSession =
@@ -2528,10 +2230,53 @@ class MusicService :
         }
     }
 
+    private fun publishPortableArtwork(mediaItem: MediaItem?) {
+        portableArtworkJob?.cancel()
+        val item = mediaItem ?: return
+        val artworkUri = item.mediaMetadata.artworkUri ?: return
+        if (item.mediaMetadata.artworkData != null) return
+        val mediaId = item.mediaId
+
+        portableArtworkJob = scope.launch {
+            val artwork = sessionArtworkLoader.loadPortableArtwork(artworkUri)
+                ?: return@launch
+            // Never put artwork from an earlier song into the current media session.
+            val current = player.currentMediaItem ?: return@launch
+            if (current.mediaId != mediaId ||
+                current.mediaMetadata.artworkUri != artworkUri ||
+                current.mediaMetadata.artworkData != null
+            ) return@launch
+
+            val updated = current.buildUpon()
+                .setMediaMetadata(
+                    current.mediaMetadata.buildUpon()
+                        .setArtworkData(
+                            artwork,
+                            androidx.media3.common.MediaMetadata.PICTURE_TYPE_FRONT_COVER,
+                        )
+                        .build(),
+                )
+                .build()
+            portableArtworkReplacementId = mediaId
+            player.replaceMediaItem(player.currentMediaItemIndex, updated)
+        }
+    }
+
     override fun onMediaItemTransition(
         mediaItem: MediaItem?,
         reason: Int,
     ) {
+        // The metadata-only artwork refresh must not be treated as a new song.
+        if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED &&
+            mediaItem != null &&
+            mediaItem.mediaId == portableArtworkReplacementId &&
+            mediaItem.mediaMetadata.artworkData != null
+        ) {
+            portableArtworkReplacementId = null
+            return
+        }
+        portableArtworkReplacementId = null
+
         // Only natural completion transitions mark the previous track as fully cached,
         // never a manual skip or seek. Read lastTransitionedMediaId before replacing it.
         if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
@@ -2542,6 +2287,8 @@ class MusicService :
             }
         }
         lastTransitionedMediaId = mediaItem?.mediaId
+        publishPortableArtwork(mediaItem)
+        activatePlaybackNotification()
         initialBufferRecoveryJob?.cancel()
         initialBufferRecoveryJob = null
         initialBufferRecoveryAttemptedMediaId = null
@@ -2577,14 +2324,7 @@ class MusicService :
         }
         previousMediaItemIndex = player.currentMediaItemIndex
 
-        lastPlaybackSpeed = -1.0f // force update song
-
-        setupAudioNormalization()
-
-        scrobbleManager?.onSongStop()
-        if (player.playWhenReady && player.playbackState == Player.STATE_READY) {
-            scrobbleManager?.onSongStart(player.currentMetadata, duration = player.duration)
-        }
+        applyPreparedAudioNormalizationNow(immediate = true)
 
         // Skip if this change was triggered by Cast sync (to prevent loops)
         if (castConnectionHandler?.isCasting?.value == true &&
@@ -2689,9 +2429,6 @@ class MusicService :
             scheduleCrossfade()
         }
 
-        if (playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED) {
-            scrobbleManager?.onSongStop()
-        }
     }
 
     override fun onPlayWhenReadyChanged(
@@ -2724,6 +2461,9 @@ class MusicService :
 
         if (playWhenReady) {
             applyCachedAudioNormalizationNow()
+            activatePlaybackNotification()
+        } else {
+            foregroundRequestedForPlayback = false
         }
 
         updateInitialBufferRecovery(player.playbackState)
@@ -2802,32 +2542,7 @@ class MusicService :
 
         if (events.containsAny(Player.EVENT_IS_PLAYING_CHANGED)) {
             updateWidgetUI(player.isPlaying)
-            if (player.isPlaying) {
-                discordIntentionalDisconnect = false
-                screenOffHandler.removeCallbacks(screenOffTimeout)
-                screenOffHandler.removeCallbacks(pauseTimeout)
-                startWidgetUpdates()
-            } else {
-                stopWidgetUpdates()
-                if (isScreenOff) {
-                    screenOffHandler.removeCallbacks(screenOffTimeout)
-                    screenOffHandler.postDelayed(screenOffTimeout, 600_000)
-                } else {
-                    screenOffHandler.postDelayed(pauseTimeout, 60_000)
-                }
-            }
-        }
-
-        if (events.containsAny(
-                Player.EVENT_MEDIA_ITEM_TRANSITION,
-                Player.EVENT_IS_PLAYING_CHANGED,
-            )
-        ) {
-            syncDiscordState()
-        }
-
-        if (events.containsAny(Player.EVENT_IS_PLAYING_CHANGED)) {
-            scrobbleManager?.onPlayerStateChanged(player.isPlaying, player.currentMetadata, duration = player.duration)
+            if (player.isPlaying) startWidgetUpdates() else stopWidgetUpdates()
         }
     }
 
@@ -2911,21 +2626,6 @@ class MusicService :
                 shuffledIndices[currentItemIndexInShuffled] = temp
             }
             player.setShuffleOrder(DefaultShuffleOrder(shuffledIndices, System.currentTimeMillis()))
-        }
-    }
-
-    override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
-        super.onPlaybackParametersChanged(playbackParameters)
-        if (playbackParameters.speed != lastPlaybackSpeed) {
-            Timber.tag("DiscordSvc").d("onPlaybackParametersChanged: speed changed %s -> %s", lastPlaybackSpeed, playbackParameters.speed)
-            lastPlaybackSpeed = playbackParameters.speed
-            DiscordRpcManager.notifySettingsChanged()
-            scope.launch {
-                delay(1000)
-                if (player.playWhenReady && player.playbackState == Player.STATE_READY) {
-                    syncDiscordState()
-                }
-            }
         }
     }
 
@@ -3572,239 +3272,6 @@ class MusicService :
         }
     }
 
-    private fun syncDiscordState() {
-        if (!discordRpcEnabled) return
-
-        val songId = player.currentMetadata?.id
-        if (songId == null) {
-            Timber.tag("DiscordSvc").d("syncDiscordState: no song, clearing presence")
-            DiscordRpcManager.clear()
-            return
-        }
-
-            if (!DiscordRpcManager.isReady()) {
-            if (discordIntentionalDisconnect) {
-                Timber.tag("DiscordSvc").d("syncDiscordState: not ready, skipping (intentional disconnect)")
-                return
-            }
-            val token = DiscordRpcManager.getAccessToken()
-            val now = System.currentTimeMillis()
-            if (token != null && (now - lastDiscordReconnectAttemptAtMs) > 30_000L) {
-                lastDiscordReconnectAttemptAtMs = now
-                Timber.tag("DiscordSvc").i("syncDiscordState: not ready, attempting reconnect")
-                scope.launch(Dispatchers.IO) {
-                    if (!DiscordRpcManager.isInitialized()) {
-                        DiscordRpcManager.init(this@MusicService)
-                    }
-                    DiscordRpcManager.reconnectWithToken(token)
-                }
-            }
-            return
-        }
-
-        val isPlaying = player.isPlaying
-        if (DiscordRpcManager.isShowingSong(songId, isPlaying)) {
-            Timber.tag("DiscordSvc").d("syncDiscordState: dedup, already showing songId=%s isPlaying=%s", songId, isPlaying)
-            return
-        }
-
-        scope.launch(Dispatchers.IO) {
-            val (freshSongId, freshIsPlaying) = withContext(Dispatchers.Main.immediate) {
-                player.currentMetadata?.id to player.isPlaying
-            }
-            if (freshSongId == null) return@launch
-            val song = database.song(freshSongId).first() ?: return@launch
-            updateDiscordRPC(song, freshIsPlaying)
-        }
-    }
-
-    private suspend fun updateDiscordRPC(song: Song, isPlaying: Boolean) {
-        if (!DiscordRpcManager.isReady()) {
-            Timber.tag("DiscordSvc").w("updateDiscordRPC: skipping — not ready")
-            return
-        }
-        if (!discordRpcEnabled) {
-            Timber.tag("DiscordSvc").w("updateDiscordRPC: skipping — RPC disabled")
-            return
-        }
-
-        Timber.tag("DiscordSvc").i("updateDiscordRPC: song=%s, isPlaying=%s", song.song.title, isPlaying)
-
-        // ExoPlayer must be accessed on the main thread
-        val (currentPosition, speed) = withContext(Dispatchers.Main.immediate) {
-            player.currentPosition to player.playbackParameters.speed
-        }
-        val adjustedTime = (currentPosition / speed).toLong()
-        val now = System.currentTimeMillis()
-        val startTime = if (isPlaying) now - adjustedTime else 0L
-        val durationMs = song.song.duration.takeIf { it > 0 }?.times(1000L)
-        val remainingMs = durationMs?.minus(currentPosition)?.coerceAtLeast(0L)
-        val adjustedRemainingMs = remainingMs?.let { (it / speed).toLong() }
-        val endTime = if (isPlaying && adjustedRemainingMs != null) now + adjustedRemainingMs else null
-
-        val artistName = song.artists.joinToString { it.name }.ifEmpty { DiscordDefaults.UNKNOWN_ARTIST }
-        val albumName = song.album?.title
-        val songTitle = if (speed != 1.0f) {
-            "${song.song.title} [${String.format("%.2fx", speed)}]"
-        } else {
-            song.song.title
-        }
-        val artistThumbnail = song.artists.firstOrNull()?.thumbnailUrl
-
-        val advancedMode = dataStore.get(DiscordAdvancedModeKey, false)
-        val activityType = dataStore.get(DiscordActivityTypeKey, DiscordDefaults.ACTIVITY_TYPE).toIntOrNull() ?: DiscordActivity.TYPE_LISTENING
-        val activityName = dataStore.get(DiscordActivityNameKey, DiscordDefaults.ACTIVITY_NAME)
-        val stateTemplate = dataStore.get(DiscordStateTemplateKey, DiscordDefaults.STATE_TEMPLATE)
-        val detailsTemplate = dataStore.get(DiscordDetailsTemplateKey, DiscordDefaults.DETAILS_TEMPLATE)
-        val btn1Enabled = dataStore.get(DiscordButton1EnabledKey, true)
-        val btn1Label = dataStore.get(DiscordButton1LabelKey, DiscordDefaults.BUTTON1_LABEL)
-        val btn1Url = dataStore.get(DiscordButton1UrlKey, DiscordDefaults.BUTTON1_URL_TEMPLATE)
-        val btn2Enabled = dataStore.get(DiscordButton2EnabledKey, true)
-        val btn2Label = dataStore.get(DiscordButton2LabelKey, DiscordDefaults.BUTTON2_LABEL)
-        val btn2Url = dataStore.get(DiscordButton2UrlKey, DiscordDefaults.BUTTON2_URL)
-
-        Timber.tag("DiscordSvc").d(
-            "updateDiscordRPC: prefs — advancedMode=%s, activityType=%d, activityName=%s, stateTemplate=%s, detailsTemplate=%s",
-            advancedMode, activityType, activityName, stateTemplate, detailsTemplate,
-        )
-
-        val activity = DiscordActivityBuilder.build(
-            song = song,
-            artistName = artistName,
-            albumName = albumName,
-            artistThumbnail = artistThumbnail,
-            songTitle = songTitle,
-            startTimestamp = startTime,
-            endTimestamp = endTime,
-            advancedMode = advancedMode,
-            activityType = activityType,
-            activityName = activityName,
-            stateTemplate = stateTemplate,
-            detailsTemplate = detailsTemplate,
-            btn1Enabled = btn1Enabled,
-            btn1Label = btn1Label,
-            btn1Url = btn1Url,
-            btn2Enabled = btn2Enabled,
-            btn2Label = btn2Label,
-            btn2Url = btn2Url,
-        )
-
-        Timber.tag("DiscordSvc").i("updateDiscordRPC: type=%d name=%s state=%s details=%s start=%d end=%d isPlaying=%s",
-            activity.activityType, activity.name, activity.state, activity.details, startTime, endTime ?: 0L, isPlaying)
-
-        val statusStr = dataStore.get(DiscordUserStatusKey, DiscordDefaults.USER_STATUS)
-        val presenceStatus = when (statusStr) {
-            DiscordDefaults.STATUS_IDLE -> if (advancedMode) PresenceStatus.Idle else PresenceStatus.Online
-            DiscordDefaults.STATUS_DND -> if (advancedMode) PresenceStatus.Dnd else PresenceStatus.Online
-            else -> PresenceStatus.Online
-        }
-
-        DiscordRpcManager.setActivity(
-            activity,
-            songId = song.song.id,
-            isPlaying = isPlaying,
-            status = presenceStatus,
-        )
-
-        val fetched = fetchArtistThumbnail(song)
-        if (fetched != null && DiscordRpcManager.isReady() && discordRpcEnabled) {
-            Timber.tag("DiscordSvc").i("updateDiscordRPC: updating with fetched thumbnail")
-            val fetchedArtistName = fetched.artists.joinToString { it.name }.ifEmpty { DiscordDefaults.UNKNOWN_ARTIST }
-            val fetchedAlbumName = fetched.album?.title
-            val fetchedArtistThumbnail = fetched.artists.firstOrNull()?.thumbnailUrl
-
-            val (freshPosition, freshSpeed, freshIsPlaying) = withContext(Dispatchers.Main.immediate) {
-                Triple(player.currentPosition, player.playbackParameters.speed, player.isPlaying)
-            }
-            val freshAdjustedTime = (freshPosition / freshSpeed).toLong()
-            val freshNow = System.currentTimeMillis()
-            val freshStartTime = if (freshIsPlaying) freshNow - freshAdjustedTime else 0L
-            val freshDurationMs = fetched.song.duration.takeIf { it > 0 }?.times(1000L)
-            val freshRemainingMs = freshDurationMs?.minus(freshPosition)?.coerceAtLeast(0L)
-            val freshAdjustedRemainingMs = freshRemainingMs?.let { (it / freshSpeed).toLong() }
-            val freshEndTime = if (freshIsPlaying && freshAdjustedRemainingMs != null) freshNow + freshAdjustedRemainingMs else null
-
-            val fetchedActivity = DiscordActivityBuilder.build(
-                song = fetched,
-                artistName = fetchedArtistName,
-                albumName = fetchedAlbumName,
-                artistThumbnail = fetchedArtistThumbnail,
-                songTitle = songTitle,
-                startTimestamp = freshStartTime,
-                endTimestamp = freshEndTime,
-                advancedMode = advancedMode,
-                activityType = activityType,
-                activityName = activityName,
-                stateTemplate = stateTemplate,
-                detailsTemplate = detailsTemplate,
-                btn1Enabled = btn1Enabled,
-                btn1Label = btn1Label,
-                btn1Url = btn1Url,
-                btn2Enabled = btn2Enabled,
-                btn2Label = btn2Label,
-                btn2Url = btn2Url,
-            )
-
-            DiscordRpcManager.setActivity(
-                fetchedActivity,
-                songId = song.song.id,
-                isPlaying = freshIsPlaying,
-                status = presenceStatus,
-            )
-        } else {
-            Timber.tag("DiscordSvc").i("updateDiscordRPC: fetched=%s (no thumbnail update)", fetched != null)
-        }
-    }
-
-    private suspend fun fetchArtistThumbnail(song: Song): Song? {
-        val artist = song.artists.firstOrNull()
-        if (artist == null) {
-            Timber.tag("DiscordSvc").d("fetchArtistThumbnail: no artist, skipping")
-            return null
-        }
-        if (artist.thumbnailUrl != null) {
-            Timber.tag("DiscordSvc").d("fetchArtistThumbnail: artist already has thumbnail, skipping")
-            return null
-        }
-
-        val browseId = when {
-            artist.channelId != null && !artist.channelId.startsWith("LA")
-                && !artist.channelId.startsWith("FEmusic_library_privately_owned") -> {
-                artist.channelId
-            }
-            !artist.id.startsWith("LA")
-                && !artist.id.startsWith("FEmusic_library_privately_owned") -> {
-                artist.id
-            }
-            else -> {
-                Timber.tag("DiscordSvc").d("fetchArtistThumbnail: no valid browseId for artist %s", artist.name)
-                return null
-            }
-        }
-
-        Timber.tag("DiscordSvc").d("fetchArtistThumbnail: fetching for artist=%s, browseId=%s", artist.name, browseId)
-
-        return try {
-            val artistPage = withContext(Dispatchers.IO) {
-                YouTube.artist(browseId).getOrNull()
-            }
-            val thumbnail = artistPage?.artist?.thumbnail?.resize(1080, 1080)
-            if (thumbnail != null) {
-                Timber.tag("DiscordSvc").d("fetchArtistThumbnail: got thumbnail for %s", artist.name)
-                withContext(Dispatchers.IO) {
-                    database.updateArtistThumbnail(artist.id, thumbnail)
-                }
-                database.getSongById(song.song.id)
-            } else {
-                Timber.tag("DiscordSvc").d("fetchArtistThumbnail: no thumbnail found for %s", artist.name)
-                null
-            }
-        } catch (e: Exception) {
-            Timber.tag("DiscordSvc").w(e, "fetchArtistThumbnail: failed for artist=%s", artist.name)
-            null
-        }
-    }
-
     private fun createDataSourceFactory(
         normalizationProcessor: VolumeNormalizationAudioProcessor,
         playerProvider: () -> ExoPlayer?,
@@ -3818,7 +3285,6 @@ class MusicService :
                 mediaId = mediaId,
                 loudnessDb = storedFormat?.loudnessDb,
                 perceptualLoudnessDb = storedFormat?.perceptualLoudnessDb,
-                preserveCachedIfMissing = true,
             )
 
             val shouldBypassCache = bypassCacheForQualityChange.contains(mediaId)
@@ -3924,7 +3390,16 @@ class MusicService :
                     mediaId = mediaId,
                     loudnessDb = loudnessDb,
                     perceptualLoudnessDb = perceptualLoudnessDb,
+                    clientName = nonNullPlayback.streamClient,
                 )
+
+                // An incomplete response must not erase a valid previous absolute
+                // measurement in Room. Otherwise a restart could resurrect the
+                // ambiguous relative-only path even for a previously known song.
+                val persistentRelative = loudnessDb?.takeIf { it.isFinite() }
+                    ?: storedFormat?.loudnessDb?.takeIf { it.isFinite() }
+                val persistentAbsolute = perceptualLoudnessDb?.takeIf { it.isFinite() }
+                    ?: storedFormat?.perceptualLoudnessDb?.takeIf { it.isFinite() }
 
                 format.contentLength?.let { contentLength ->
                     database.query {
@@ -3942,8 +3417,8 @@ class MusicService :
                                 bitrate = format.bitrate,
                                 sampleRate = format.audioSampleRate,
                                 contentLength = contentLength,
-                                loudnessDb = loudnessDb,
-                                perceptualLoudnessDb = perceptualLoudnessDb,
+                                loudnessDb = persistentRelative,
+                                perceptualLoudnessDb = persistentAbsolute,
                                 playbackUrl = nonNullPlayback.playbackTracking?.videostatsPlaybackUrl?.baseUrl,
                             ),
                         )
@@ -3997,7 +3472,6 @@ class MusicService :
 
     private fun createRenderersFactory(
         normalizationProcessor: VolumeNormalizationAudioProcessor,
-        eqProcessor: CustomEqualizerAudioProcessor,
         silenceProcessor: SilenceDetectorAudioProcessor,
         useAudioTrackPlaybackParams: Boolean,
     ) = object : DefaultRenderersFactory(this) {
@@ -4051,13 +3525,15 @@ class MusicService :
             enableAudioTrackPlaybackParams: Boolean,
         ) = DefaultAudioSink
             .Builder(this@MusicService)
-            .setEnableFloatOutput(enableFloatOutput)
+            // Media3 bypasses custom AudioProcessorChain processing on its
+            // direct float-output path. All audio must pass through the PCM
+            // chain for normalization to be consistently applied.
+            .setEnableFloatOutput(false)
             .setEnableAudioTrackPlaybackParams(useAudioTrackPlaybackParams)
             .setAudioProcessorChain(
                 DefaultAudioSink.DefaultAudioProcessorChain(
                     arrayOf(
                         normalizationProcessor,
-                        eqProcessor,
                         silenceProcessor,
                     ),
                     SilenceSkippingAudioProcessor(2_000_000, 20_000, 256),
@@ -4072,8 +3548,15 @@ class MusicService :
     ) {
         val mediaItem = eventTime.timeline.getWindow(eventTime.windowIndex, Timeline.Window()).mediaItem
         val historyDurationMs = dataStore[HistoryDuration]?.times(1000f) ?: 30000f
+        // A qualifying listen should be saved even when the track is shorter than the
+        // user's minimum history duration (30 seconds by default). This is based on
+        // actual listening time, not the seek position, so skipping to the end does
+        // not create a play. Unknown-duration tracks retain the history-duration rule.
+        val qualifiesAsPlay = mediaItem.metadata?.duration?.takeIf { it > 0 }?.let { durationSeconds ->
+            playbackStats.totalPlayTimeMs > durationSeconds.toLong() * 700L
+        } ?: false
 
-        if (playbackStats.totalPlayTimeMs >= historyDurationMs &&
+        if ((playbackStats.totalPlayTimeMs >= historyDurationMs || qualifiesAsPlay) &&
             !dataStore.get(PauseListenHistoryKey, false)
         ) {
             database.query {
@@ -4176,13 +3659,6 @@ class MusicService :
      * [Context.startForegroundService] requires [startForeground] to succeed quickly. If we cannot
      * enter the foreground state, stop immediately so the system does not ANR the app process.
      */
-    private fun ensureStartedAsForegroundOrStop(): Boolean =
-        startForegroundSafely(
-            notification = createFallbackForegroundNotification(),
-            deniedMessage = "Foreground service start not allowed; stopping service to avoid ANR",
-            failureMessage = "Failed to enter foreground; stopping service to avoid ANR",
-        )
-
     private fun ensureForegroundWithLatestNotificationOrStop(): Boolean =
         startForegroundSafely(
             notification = latestMediaNotification ?: createFallbackForegroundNotification(),
@@ -4261,6 +3737,69 @@ class MusicService :
             false
         }
 
+    /**
+     * Distinguishes an active/starting session from an idle service when the
+     * Activity enters the background. Buffering must not stop playback.
+     */
+    fun hasActivePlaybackIntent(): Boolean {
+        if (!::player.isInitialized) return false
+        return (player.playWhenReady && player.playbackState != Player.STATE_ENDED) ||
+            castConnectionHandler?.isCasting?.value == true
+    }
+
+    /**
+     * The session's internal MediaController must be connected for reliable
+     * Media3 notifications on some devices. Unlike the old implementation,
+     * create it only for actual playback, not every time the app opens.
+     */
+    private fun connectPlaybackNotificationController() {
+        if (controllerFuture != null || mediaSession == null) return
+        val token = SessionToken(this, ComponentName(this, MusicService::class.java))
+        val future = MediaController.Builder(this, token).buildAsync()
+        controllerFuture = future
+        future.addListener({
+            try {
+                future.get()
+            } catch (error: Exception) {
+                Timber.tag(TAG).w(error, "Failed to connect playback notification controller")
+                if (controllerFuture === future) {
+                    controllerFuture = null
+                    MediaController.releaseFuture(future)
+                }
+            }
+        }, MoreExecutors.directExecutor())
+    }
+
+    /**
+     * Foreground playback is requested only when a playable item is starting.
+     * The actual media controls replace the temporary foreground notification
+     * as Media3 publishes its playback metadata.
+     */
+    private fun activatePlaybackNotification() {
+        if (mediaSession == null ||
+            !::player.isInitialized ||
+            !player.playWhenReady ||
+            player.currentMediaItem == null ||
+            castConnectionHandler?.isCasting?.value == true
+        ) return
+
+        connectPlaybackNotificationController()
+        if (!foregroundRequestedForPlayback) {
+            foregroundRequestedForPlayback = tryEnsureForegroundWithLatestNotification()
+        }
+    }
+
+    /**
+     * Disconnect our extra controller when the UI leaves with playback idle,
+     * so it does not keep an unused service bound indefinitely.
+     */
+    fun releaseIdlePlaybackNotificationController() {
+        if (hasActivePlaybackIntent()) return
+        controllerFuture?.let { MediaController.releaseFuture(it) }
+        controllerFuture = null
+        foregroundRequestedForPlayback = false
+    }
+
     override fun onDestroy() {
         isRunning = false
 
@@ -4291,13 +3830,6 @@ class MusicService :
             saveQueueToDisk()
             savePlayerStateToDisk()
         }
-        screenOffHandler.removeCallbacks(screenOffTimeout)
-        screenOffHandler.removeCallbacks(pauseTimeout)
-        if (DiscordRpcManager.isReady()) {
-            Timber.tag("DiscordSvc").i("onDestroy: disconnecting Discord RPC")
-            DiscordRpcManager.disconnect()
-        }
-        DiscordRpcManager.destroy()
         connectivityObserver.unregister()
         abandonAudioFocus()
         closeAudioEffectSession()
@@ -4366,9 +3898,10 @@ class MusicService :
                 abandonAudioFocus()
             }
         }.onFailure { Timber.tag(TAG).e(it, "Failed to stop playback on task clear") }
+        latestMediaNotification = null
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controllerFuture = null
-        latestMediaNotification = null
+        foregroundRequestedForPlayback = false
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID)
         // Media3: coordinates notification/foreground teardown and stopSelf; required when
@@ -4414,25 +3947,16 @@ class MusicService :
             }
             taskCleared = false
         }
-        // On Android O+, every startForegroundService() call requires
-        // Service.startForeground() to be called within a short timeout.
-        // Some OEMs (e.g. MIUI) strictly enforce this even when the
-        // service is already in the foreground, so promote here unless Media3 is handling a
-        // notification dismissal. Re-promoting that intent immediately restores the dismissed
-        // media control.
-        val isNotificationDismissal =
-            intent?.getBooleanExtra(MediaNotification.NOTIFICATION_DISMISSED_EVENT_KEY, false) == true
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !isNotificationDismissal) {
+        // Headset media buttons may explicitly start a foreground service.
+        // Widget updates and media notifications must not create a placeholder one.
+        val requiresEarlyForeground = intent?.action == Intent.ACTION_MEDIA_BUTTON
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && requiresEarlyForeground) {
             if (!ensureForegroundWithLatestNotificationOrStop()) {
                 return START_NOT_STICKY
             }
         }
 
         when (intent?.action) {
-            ACTION_ALARM_TRIGGER -> {
-                handleAlarmTrigger(intent)
-            }
-
             MusicWidgetReceiver.ACTION_PLAY_PAUSE -> {
                 if (player.isPlaying) player.pause() else player.play()
                 updateWidgetUI(player.isPlaying)
@@ -4462,7 +3986,23 @@ class MusicService :
             }
         }
 
-        return super.onStartCommand(intent, flags, startId)
+        val result = super.onStartCommand(intent, flags, startId)
+        // Widget refreshes and controls must not leave a started service behind
+        // when no playback is active. Playlist requests are asynchronous and
+        // must remain alive until they have initiated playback.
+        val isSimpleWidgetRequest = when (intent?.action) {
+            MusicWidgetReceiver.ACTION_UPDATE_WIDGET,
+            PlaylistWidgetReceiver.ACTION_UPDATE_WIDGET,
+            MusicWidgetReceiver.ACTION_LIKE,
+            MusicWidgetReceiver.ACTION_NEXT,
+            MusicWidgetReceiver.ACTION_PREVIOUS,
+            MusicWidgetReceiver.ACTION_PLAY_PAUSE -> true
+            else -> false
+        }
+        if (isSimpleWidgetRequest && !hasActivePlaybackIntent()) {
+            stopSelf(startId)
+        }
+        return result
     }
 
 
@@ -4568,96 +4108,6 @@ class MusicService :
             }
 
             else -> null
-        }
-    }
-
-    private fun handleAlarmTrigger(intent: Intent) {
-        scope.launch(Dispatchers.IO) {
-            try {
-                MusicAlarmScheduler.scheduleFromPreferences(this@MusicService)
-            } catch (t: Throwable) {
-                Timber.tag(TAG).e(t, "Failed to reschedule alarms after trigger")
-            }
-        }
-        val playlistId = intent.getStringExtra(EXTRA_ALARM_PLAYLIST_ID).orEmpty()
-        val alarmId = intent.getStringExtra(EXTRA_ALARM_ID).orEmpty()
-        if (playlistId.isBlank()) {
-            if (alarmId.isNotBlank()) {
-                scope.launch(Dispatchers.IO) {
-                    try {
-                        val alarms = MusicAlarmStore.load(this@MusicService)
-                        val updated =
-                            alarms.map { alarm ->
-                                if (alarm.id == alarmId) alarm.copy(enabled = false, nextTriggerAt = -1L) else alarm
-                            }
-                        MusicAlarmScheduler.scheduleAll(this@MusicService, updated)
-                    } catch (t: Throwable) {
-                        Timber.tag(TAG).e(t, "Failed to disable alarm with invalid playlist")
-                    }
-                }
-            }
-            return
-        }
-        val randomSong = intent.getBooleanExtra(EXTRA_ALARM_RANDOM_SONG, false)
-        scope.launch {
-            try {
-                val playlistSongs =
-                    withContext(Dispatchers.IO) {
-                        database.playlistSongs(playlistId).first()
-                    }
-                if (playlistSongs.isEmpty()) {
-                    if (alarmId.isNotBlank()) {
-                        withContext(Dispatchers.IO) {
-                            val alarms = MusicAlarmStore.load(this@MusicService)
-                            val updated =
-                                alarms.map { alarm ->
-                                    if (alarm.id == alarmId) alarm.copy(enabled = false, nextTriggerAt = -1L) else alarm
-                                }
-                            MusicAlarmScheduler.scheduleAll(this@MusicService, updated)
-                        }
-                    }
-                    return@launch
-                }
-                val items = playlistSongs.map { it.song.toMediaItem() }
-                val playlistName =
-                    withContext(Dispatchers.IO) {
-                        database
-                            .playlist(playlistId)
-                            .first()
-                            ?.playlist
-                            ?.name
-                    }
-                withContext(Dispatchers.IO) {
-                    MusicAlarmScheduler.scheduleFromPreferences(this@MusicService)
-                }
-
-                val alarmItems =
-                    if (randomSong) {
-                        val firstIndex = Random.nextInt(items.size)
-                        buildList(items.size) {
-                            add(items[firstIndex])
-                            items.forEachIndexed { index, item ->
-                                if (index != firstIndex) add(item)
-                            }
-                        }
-                    } else {
-                        items
-                    }
-
-                player.stop()
-                player.clearMediaItems()
-                playQueue(
-                    ListQueue(
-                        title = playlistName,
-                        items = alarmItems,
-                        startIndex = 0,
-                        position = 0L,
-                    ),
-                    playWhenReady = true,
-                )
-            } catch (t: Throwable) {
-                Timber.tag(TAG).e(t, "Failed to start alarm playback")
-            }
         }
     }
 
@@ -4953,7 +4403,7 @@ class MusicService :
         // secondaryPlayer was playing this item silently in the background without
         // `this` attached as a listener, so its real transition into this item never
         // reached onMediaItemTransition. Re-fire it manually now that the swap is done
-        // so metadata recovery, cache marking, scrobbling, and normalization all run.
+        // so metadata recovery, cache marking, and normalization all run.
         onMediaItemTransition(player.currentMediaItem, Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
 
         val previousAudioSessionId = fadingPlayer?.audioSessionId ?: C.AUDIO_SESSION_ID_UNSET
@@ -5026,16 +4476,10 @@ class MusicService :
         historyReporters.remove(player)?.close()
         playerNormalizationProcessors.remove(player)
         playerSilenceProcessors.remove(player)
-        playerEqualizerProcessors.remove(player)?.let(equalizerService::removeAudioProcessor)
         player.release()
     }
 
     companion object {
-        const val ACTION_ALARM_TRIGGER = "com.metrolist.music.action.ALARM_TRIGGER"
-        const val EXTRA_ALARM_ID = "extra_alarm_id"
-        const val EXTRA_ALARM_PLAYLIST_ID = "extra_alarm_playlist_id"
-        const val EXTRA_ALARM_RANDOM_SONG = "extra_alarm_random_song"
-
         const val ROOT = "root"
         const val SONG = "song"
         const val ARTIST = "artist"
@@ -5072,9 +4516,35 @@ internal fun normalizationGainMb(
     loudnessDb: Double?,
     perceptualLoudnessDb: Double?,
     targetLufs: Float,
+    relativeReferenceLufs: Double? = null,
 ): Int? {
-    val measuredLufs = perceptualLoudnessDb ?: loudnessDb?.let { it + LoudnessLevel.AGGRESSIVE.targetLufs }
-    return measuredLufs
-        ?.let { (-(it - targetLufs) * 100.0).toInt() }
-        ?.coerceIn(-1500, 300)
+    if (!targetLufs.isFinite()) return null
+    // Absolute perceptual loudness is the only directly comparable measurement.
+    // Relative loudness must be anchored to a reference learned from the same
+    // YouTube extraction client; assuming -7 mis-scales clients targeting -14.
+    val measuredLufs = perceptualLoudnessDb?.takeIf { it.isFinite() }
+        ?: loudnessDb?.takeIf { it.isFinite() }?.let { relative ->
+            relativeReferenceLufs?.takeIf { it.isFinite() }?.let { reference -> relative + reference }
+        }
+        ?: return null
+    return ((targetLufs.toDouble() - measuredLufs) * 100.0)
+        .coerceIn(-3000.0, 1200.0)
+        .roundToInt()
 }
+
+// Missing measurements must not turn a track up to unattenuated full volume.
+// This is a conservative estimate, not a loudness measurement.
+internal fun fallbackNormalizationGainMb(targetLufs: Float): Int =
+    if (targetLufs.isFinite()) ((targetLufs - (-7f)) * 100f).coerceIn(-3000f, 0f).roundToInt() else -700
+
+/**
+ * Offload plays encoded audio directly and bypasses the Media3 PCM
+ * AudioProcessorChain (normalization and silence detection).
+ * Per-track gain must never silently disappear on offload-capable formats.
+ * Preserve opt-in offload only when normalization and crossfade are both off.
+ */
+internal fun shouldEnableAudioOffload(
+    offloadPreferred: Boolean,
+    crossfadeEnabled: Boolean,
+    normalizationEnabled: Boolean,
+): Boolean = offloadPreferred && !crossfadeEnabled && !normalizationEnabled

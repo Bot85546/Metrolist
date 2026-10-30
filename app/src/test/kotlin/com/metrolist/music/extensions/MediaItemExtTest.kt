@@ -20,6 +20,41 @@ import org.robolectric.annotation.Config
 @Config(sdk = [33])
 class MediaItemExtTest {
     @Test
+    fun `saved low resolution artwork is upgraded when prepared for playback`() {
+        val item = MediaMetadata(
+            id = "saved-song",
+            title = "Saved song",
+            artists = emptyList(),
+            duration = 180,
+            thumbnailUrl = "https://yt3.googleusercontent.com/art=w60-h60-l90-rj",
+        ).toMediaItem()
+
+        val expected = "https://yt3.googleusercontent.com/art=w1080-h1080-p-l90-rj"
+        assertEquals(expected, item.metadata?.thumbnailUrl)
+        assertEquals(expected, item.mediaMetadata.artworkUri?.toString())
+        assertEquals(expected, item.mediaMetadata.extras?.getString("artwork_uri"))
+    }
+
+    @Test
+    fun `metadata refresh upgrades old artwork variants too`() {
+        val original = MediaMetadata(
+            id = "song",
+            title = "Song",
+            artists = emptyList(),
+            duration = 180,
+        ).toMediaItem()
+        val updated = original.withUpdatedMetadata(
+            requireNotNull(original.metadata).copy(
+                thumbnailUrl = "https://lh3.googleusercontent.com/art=s60",
+            ),
+        )
+
+        val expected = "https://lh3.googleusercontent.com/art=w1080-h1080-p-l90-rj"
+        assertEquals(expected, updated.metadata?.thumbnailUrl)
+        assertEquals(expected, updated.mediaMetadata.artworkUri?.toString())
+    }
+
+    @Test
     fun `updated metadata replaces title artists artwork and explicit flag`() {
         val original =
             MediaMetadata(

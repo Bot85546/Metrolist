@@ -317,12 +317,12 @@ fun AppearanceSettings(
     val (showCachedPlaylist, onShowCachedPlaylistChange) =
         rememberPreference(
             ShowCachedPlaylistKey,
-            defaultValue = true,
+            defaultValue = false,
         )
     val (showUploadedPlaylist, onShowUploadedPlaylistChange) =
         rememberPreference(
             ShowUploadedPlaylistKey,
-            defaultValue = true,
+            defaultValue = false,
         )
 
     val availableBackgroundStyles =

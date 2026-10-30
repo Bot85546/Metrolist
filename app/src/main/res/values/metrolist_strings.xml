@@ -66,6 +66,7 @@
     <string name="like_all">Like all</string>
     <string name="dislike_all">Dislike all</string>
     <string name="sort_by_last_updated">Date updated</string>
+    <string name="sort_by_times_played">Times played</string>
     <string name="link_copied">Link copied to clipboard</string>
     <string name="starting_radio">Starting radio…</string>
     <string name="now_playing">Now Playing</string>

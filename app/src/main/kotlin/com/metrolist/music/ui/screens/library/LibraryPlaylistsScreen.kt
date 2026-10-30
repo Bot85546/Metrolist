@@ -90,7 +90,6 @@ import com.metrolist.music.utils.rememberPreference
 import com.metrolist.music.viewmodels.LibraryPlaylistsViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.util.UUID
 
 private data class VisiblePlaylistItem(
     val key: String,
@@ -143,62 +142,73 @@ fun LibraryPlaylistsScreen(
 
     val topSize by viewModel.topValue.collectAsStateWithLifecycle(initialValue = 50)
 
-    val likedPlaylist =
+    // Stable virtual playlist IDs avoid repeated database lookups and item
+    // recreation during unrelated recompositions (for example, playback state).
+    val likedLabel = stringResource(R.string.liked)
+    val likedPlaylist = remember(likedLabel) {
         Playlist(
             playlist = PlaylistEntity(
-                id = UUID.randomUUID().toString(),
-                name = stringResource(R.string.liked)
+                id = "__metrolitt_virtual_liked__",
+                name = likedLabel,
             ),
             songCount = 0,
             songThumbnails = emptyList(),
         )
+    }
 
-    val downloadPlaylist =
+    val downloadedLabel = stringResource(R.string.offline)
+    val downloadPlaylist = remember(downloadedLabel) {
         Playlist(
             playlist = PlaylistEntity(
-                id = UUID.randomUUID().toString(),
-                name = stringResource(R.string.offline)
+                id = "__metrolitt_virtual_downloaded__",
+                name = downloadedLabel,
             ),
             songCount = 0,
             songThumbnails = emptyList(),
         )
+    }
 
-    val topPlaylist =
+    val topLabel = stringResource(R.string.my_top)
+    val topPlaylist = remember(topLabel, topSize) {
         Playlist(
             playlist = PlaylistEntity(
-                id = UUID.randomUUID().toString(),
-                name = stringResource(R.string.my_top) + " $topSize"
+                id = "__metrolitt_virtual_top__",
+                name = topLabel + " $topSize",
             ),
             songCount = 0,
             songThumbnails = emptyList(),
         )
+    }
 
-
-    val uploadedPlaylist =
+    val cachedLabel = stringResource(R.string.cached_playlist)
+    val cachedPlaylist = remember(cachedLabel) {
         Playlist(
             playlist = PlaylistEntity(
-                id = UUID.randomUUID().toString(),
-                name = stringResource(R.string.uploaded_playlist)
+                id = "__metrolitt_virtual_cached__",
+                name = cachedLabel,
             ),
             songCount = 0,
             songThumbnails = emptyList(),
         )
+    }
 
-    val cachedPlaylist =
+    val uploadedLabel = stringResource(R.string.uploaded_playlist)
+    val uploadedPlaylist = remember(uploadedLabel) {
         Playlist(
             playlist = PlaylistEntity(
-                id = UUID.randomUUID().toString(),
-                name = stringResource(R.string.cached_playlist)
+                id = "__metrolitt_virtual_uploaded__",
+                name = uploadedLabel,
             ),
             songCount = 0,
             songThumbnails = emptyList(),
         )
+    }
 
     val (showLiked) = rememberPreference(ShowLikedPlaylistKey, true)
     val (showDownloaded) = rememberPreference(ShowDownloadedPlaylistKey, true)
     val (showTop) = rememberPreference(ShowTopPlaylistKey, true)
-    val (showUploaded) = rememberPreference(ShowUploadedPlaylistKey, true)
-    val (showCached) = rememberPreference(ShowCachedPlaylistKey, true)
+    val (showUploaded) = rememberPreference(ShowUploadedPlaylistKey, false)
+    val (showCached) = rememberPreference(ShowCachedPlaylistKey, false)
     val showLikedPlaylist = showLiked && matchesNormalizedQuery(normalizedQuery, likedPlaylist.playlist.name)
     val showDownloadedPlaylist =
         showDownloaded && matchesNormalizedQuery(normalizedQuery, downloadPlaylist.playlist.name)
@@ -214,7 +224,11 @@ fun LibraryPlaylistsScreen(
         showCachedPlaylists,
         showTopPlaylists,
         showUploadedPlaylists,
-        topSize,
+        likedPlaylist,
+        downloadPlaylist,
+        cachedPlaylist,
+        topPlaylist,
+        uploadedPlaylist,
     ) {
         buildList {
             if (showLikedPlaylist) {
@@ -448,6 +462,7 @@ fun LibraryPlaylistsScreen(
                             PlaylistListItem(
                                 playlist = item.playlist,
                                 autoPlaylist = true,
+                                badges = {},
                                 modifier =
                                     Modifier
                                         .fillMaxWidth()
@@ -517,6 +532,7 @@ fun LibraryPlaylistsScreen(
                                 playlist = item.playlist,
                                 fillMaxWidth = true,
                                 autoPlaylist = true,
+                                badges = {},
                                 modifier =
                                     Modifier
                                         .fillMaxWidth()

@@ -7,7 +7,6 @@ package com.metrolist.music.playback.audio
 
 import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor
-import com.metrolist.music.eq.audio.CustomEqualizerAudioProcessor
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import org.junit.Assert.assertArrayEquals
@@ -23,11 +22,6 @@ class AudioProcessorBufferReuseTest {
     @Test
     fun `silence detection reuses its direct output buffer`() {
         assertOutputBufferIsReused(SilenceDetectorAudioProcessor(onLongSilence = {}))
-    }
-
-    @Test
-    fun `custom equalizer reuses its direct output buffer`() {
-        assertOutputBufferIsReused(CustomEqualizerAudioProcessor())
     }
 
     @Suppress("DEPRECATION")

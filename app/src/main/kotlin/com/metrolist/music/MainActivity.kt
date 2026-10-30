@@ -7,7 +7,6 @@ package com.metrolist.music
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.ForegroundServiceStartNotAllowedException
 import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Intent
@@ -242,9 +241,7 @@ class MainActivity : FragmentActivity() {
     companion object {
         private const val ACTION_SEARCH = "com.metrolist.music.action.SEARCH"
         private const val ACTION_LIBRARY = "com.metrolist.music.action.LIBRARY"
-        const val ACTION_RECOGNITION = "com.metrolist.music.action.RECOGNITION"
         const val ACTION_OPEN_WIDGET_TARGET = "com.metrolist.music.action.OPEN_WIDGET_TARGET"
-        const val EXTRA_AUTO_START_RECOGNITION = "auto_start_recognition"
         const val EXTRA_WIDGET_TARGET_TYPE = "widget_target_type"
         const val EXTRA_WIDGET_TARGET_ID = "widget_target_id"
     }
@@ -320,42 +317,33 @@ class MainActivity : FragmentActivity() {
             }
         }
 
-        // Start the playback service explicitly once so it can outlive binding.
-        // Re-issuing startForegroundService() while an existing service instance is already
-        // running can trigger "did not then call startForeground" on some Android 9 devices
-        // when the framework expects a fresh foreground promotion for that start request.
-        if (!MusicService.isRunning) {
-            val serviceIntent = Intent(this, MusicService::class.java)
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    ContextCompat.startForegroundService(this, serviceIntent)
-                } else {
-                    startService(serviceIntent)
-                }
-            } catch (e: ForegroundServiceStartNotAllowedException) {
-                Timber.w(e, "Cannot start foreground service from background")
-            } catch (e: IllegalStateException) {
-                Timber.w(e, "Failed to start foreground service")
-            }
-        }
-
-        // Bind to service - if already bound, this is a no-op but ensures we stay connected
+        // A UI-only binding must not start a foreground playback service.
+        // Media3 promotes the session automatically once playback begins.
         if (!isServiceBound) {
-            bindService(
+            isServiceBound = bindService(
                 Intent(this, MusicService::class.java),
                 serviceConnection,
                 BIND_AUTO_CREATE,
             )
-            isServiceBound = true
         }
     }
 
     override fun onStop() {
-        // Keep the service binding, PlayerConnection and Listen Together wiring alive while
-        // the Activity is backgrounded. The MusicService is a foreground service and keeps
-        // running, so the host must keep reporting playback state to the LT server; detaching
-        // the player listener here used to break LT for any host that wasn't staring at the
-        // app the whole session. Full teardown happens in onDestroy() via safeUnbindService().
+        // Only keep an off-screen binding when playback is active/starting, or
+        // Listen Together needs to monitor the player while the UI is backgrounded.
+        if (!listenTogetherManager.isInRoom &&
+            playerConnection?.service?.hasActivePlaybackIntent() != true
+        ) {
+            // The service keeps an additional controller only while music is
+            // starting/playing. Release it before unbinding so idle teardown
+            // cannot be prevented by its own MediaController connection.
+            playerConnection?.service?.releaseIdlePlaybackNotificationController()
+            safeUnbindService("onStop() without active playback")
+            playerConnection = null
+            playerConnectionSnapshot = null
+            // Ensure a previously started (but now idle) media service exits.
+            stopService(Intent(this, MusicService::class.java))
+        }
         super.onStop()
     }
 
@@ -917,13 +905,6 @@ class MainActivity : FragmentActivity() {
 
                     topAppBarScrollBehavior.state.resetHeightOffset()
 
-                    // Collapse player when navigating to equalizer
-                    if (navBackStackEntry?.destination?.route == "equalizer" &&
-                        playerBottomSheetState.isExpanded
-                    ) {
-                        playerBottomSheetState.collapseSoft()
-                    }
-
                     // Track previous tab for animations
                     navController.currentBackStackEntry?.destination?.route?.let {
                         setPreviousTab(it)
@@ -988,12 +969,10 @@ class MainActivity : FragmentActivity() {
                 LaunchedEffect(Unit) {
                     if (pendingIntent != null) {
                         handleWidgetTargetIntent(pendingIntent!!, navController)
-                        handleRecognitionIntent(pendingIntent!!, navController)
                         handleDeepLinkIntent(pendingIntent!!, navController)
                         pendingIntent = null
                     } else {
                         handleWidgetTargetIntent(intent, navController)
-                        handleRecognitionIntent(intent, navController)
                         handleDeepLinkIntent(intent, navController)
                     }
                 }
@@ -1002,7 +981,6 @@ class MainActivity : FragmentActivity() {
                     val listener =
                         Consumer<Intent> { intent ->
                             handleWidgetTargetIntent(intent, navController)
-                            handleRecognitionIntent(intent, navController)
                             handleDeepLinkIntent(intent, navController)
                         }
 
@@ -1189,15 +1167,6 @@ class MainActivity : FragmentActivity() {
                                     }
                                 }
 
-                            val onSearchLongClick: () -> Unit =
-                                remember(navController) {
-                                    {
-                                        navController.navigate("recognition") {
-                                            launchSingleTop = true
-                                        }
-                                    }
-                                }
-
                             // Pre-calculate values for graphicsLayer to avoid reading state during composition
                             val navBarTotalHeight = bottomInset + NavigationBarHeight
 
@@ -1217,7 +1186,6 @@ class MainActivity : FragmentActivity() {
                                         onItemClick = onNavItemClick,
                                         pureBlack = pureBlack,
                                         slimNav = slimNav,
-                                        onSearchLongClick = onSearchLongClick,
                                         onHomeLongHold = { showAccountDialog = true },
                                         modifier =
                                             Modifier
@@ -1319,22 +1287,12 @@ class MainActivity : FragmentActivity() {
                                     }
                                 }
 
-                            val onRailSearchLongClick: () -> Unit =
-                                remember(navController) {
-                                    {
-                                        navController.navigate("recognition") {
-                                            launchSingleTop = true
-                                        }
-                                    }
-                                }
-
                             if (showRail && currentRoute != "wrapped") {
                                 AppNavigationRail(
                                     navigationItems = navigationItems,
                                     currentRoute = currentRoute,
                                     onItemClick = onRailItemClick,
                                     pureBlack = pureBlack,
-                                    onSearchLongClick = onRailSearchLongClick,
                                     onHomeLongHold = { showAccountDialog = true },
                                 )
                             }
@@ -1523,23 +1481,6 @@ class MainActivity : FragmentActivity() {
                 }
             }
             }
-        }
-    }
-
-    /**
-     * Handles the ACTION_RECOGNITION intent sent from the Music Recognizer Widget.
-     * Always navigates to the recognition screen to show the result.
-     */
-    private fun handleRecognitionIntent(
-        intent: Intent,
-        navController: NavHostController,
-    ) {
-        if (intent.action != ACTION_RECOGNITION) return
-        val autoStart = intent.getBooleanExtra(EXTRA_AUTO_START_RECOGNITION, false)
-        intent.action = null
-        intent.removeExtra(EXTRA_AUTO_START_RECOGNITION)
-        navController.navigate(if (autoStart) "recognition?autoStart=true" else "recognition") {
-            launchSingleTop = true
         }
     }
 

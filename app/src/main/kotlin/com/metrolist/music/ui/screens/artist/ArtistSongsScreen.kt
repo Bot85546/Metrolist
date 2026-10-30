@@ -110,7 +110,7 @@ fun ArtistSongsScreen(
                             when (sortType) {
                                 ArtistSongSortType.CREATE_DATE -> R.string.sort_by_create_date
                                 ArtistSongSortType.NAME -> R.string.sort_by_name
-                                ArtistSongSortType.PLAY_TIME -> R.string.sort_by_play_time
+                                ArtistSongSortType.PLAY_TIME -> R.string.sort_by_times_played
                             }
                         },
                     )

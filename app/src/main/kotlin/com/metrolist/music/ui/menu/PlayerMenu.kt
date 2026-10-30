@@ -676,23 +676,6 @@ fun PlayerMenu(
                         if (isQueueTrigger != true) {
                             add(
                                 Material3MenuItemData(
-                                    title = { Text(text = stringResource(R.string.equalizer)) },
-                                    description = { Text(text = stringResource(R.string.equalizer_desc)) },
-                                    icon = {
-                                        Icon(
-                                            painter = painterResource(R.drawable.equalizer),
-                                            contentDescription = null,
-                                            modifier = Modifier.size(24.dp),
-                                        )
-                                    },
-                                    onClick = {
-                                        navController.navigate("equalizer")
-                                        onDismiss()
-                                    },
-                                ),
-                            )
-                            add(
-                                Material3MenuItemData(
                                     title = { Text(text = stringResource(R.string.system_equalizer)) },
                                     description = { Text(text = stringResource(R.string.system_equalizer_desc)) },
                                     icon = {

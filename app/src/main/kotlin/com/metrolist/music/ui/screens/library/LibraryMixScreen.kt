@@ -77,6 +77,7 @@ import com.metrolist.music.constants.ShowUploadedPlaylistKey
 import com.metrolist.music.constants.YtmSyncKey
 import com.metrolist.music.db.entities.Album
 import com.metrolist.music.db.entities.Artist
+import com.metrolist.music.db.entities.LocalItem
 import com.metrolist.music.db.entities.Playlist
 import com.metrolist.music.db.entities.PlaylistEntity
 import com.metrolist.music.db.entities.Song
@@ -108,8 +109,6 @@ import com.metrolist.music.viewmodels.LibraryMixViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.Collator
-import java.time.LocalDateTime
-import java.util.UUID
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -162,66 +161,73 @@ fun LibraryMixScreen(
     }
 
     val topSize by viewModel.topValue.collectAsStateWithLifecycle(initialValue = 50)
-    val likedPlaylist =
+    // Stable virtual playlist IDs avoid repeated database lookups and item
+    // recreation during unrelated recompositions (for example, playback state).
+    val likedLabel = stringResource(R.string.liked)
+    val likedPlaylist = remember(likedLabel) {
         Playlist(
-            playlist =
-                PlaylistEntity(
-                    id = UUID.randomUUID().toString(),
-                    name = stringResource(R.string.liked),
-                ),
+            playlist = PlaylistEntity(
+                id = "__metrolitt_virtual_liked__",
+                name = likedLabel,
+            ),
             songCount = 0,
             songThumbnails = emptyList(),
         )
+    }
 
-    val downloadPlaylist =
+    val downloadedLabel = stringResource(R.string.offline)
+    val downloadPlaylist = remember(downloadedLabel) {
         Playlist(
-            playlist =
-                PlaylistEntity(
-                    id = UUID.randomUUID().toString(),
-                    name = stringResource(R.string.offline),
-                ),
+            playlist = PlaylistEntity(
+                id = "__metrolitt_virtual_downloaded__",
+                name = downloadedLabel,
+            ),
             songCount = 0,
             songThumbnails = emptyList(),
         )
+    }
 
-    val topPlaylist =
+    val topLabel = stringResource(R.string.my_top)
+    val topPlaylist = remember(topLabel, topSize) {
         Playlist(
-            playlist =
-                PlaylistEntity(
-                    id = UUID.randomUUID().toString(),
-                    name = stringResource(R.string.my_top) + " $topSize",
-                ),
+            playlist = PlaylistEntity(
+                id = "__metrolitt_virtual_top__",
+                name = topLabel + " $topSize",
+            ),
             songCount = 0,
             songThumbnails = emptyList(),
         )
+    }
 
-    val cachedPlaylist =
+    val cachedLabel = stringResource(R.string.cached_playlist)
+    val cachedPlaylist = remember(cachedLabel) {
         Playlist(
-            playlist =
-                PlaylistEntity(
-                    id = UUID.randomUUID().toString(),
-                    name = stringResource(R.string.cached_playlist),
-                ),
+            playlist = PlaylistEntity(
+                id = "__metrolitt_virtual_cached__",
+                name = cachedLabel,
+            ),
             songCount = 0,
             songThumbnails = emptyList(),
         )
+    }
 
-    val uploadedPlaylist =
+    val uploadedLabel = stringResource(R.string.uploaded_playlist)
+    val uploadedPlaylist = remember(uploadedLabel) {
         Playlist(
-            playlist =
-                PlaylistEntity(
-                    id = UUID.randomUUID().toString(),
-                    name = stringResource(R.string.uploaded_playlist),
-                ),
+            playlist = PlaylistEntity(
+                id = "__metrolitt_virtual_uploaded__",
+                name = uploadedLabel,
+            ),
             songCount = 0,
             songThumbnails = emptyList(),
         )
+    }
 
     val (showLiked) = rememberPreference(ShowLikedPlaylistKey, true)
     val (showDownloaded) = rememberPreference(ShowDownloadedPlaylistKey, true)
     val (showTop) = rememberPreference(ShowTopPlaylistKey, true)
-    val (showCached) = rememberPreference(ShowCachedPlaylistKey, true)
-    val (showUploaded) = rememberPreference(ShowUploadedPlaylistKey, true)
+    val (showCached) = rememberPreference(ShowCachedPlaylistKey, false)
+    val (showUploaded) = rememberPreference(ShowUploadedPlaylistKey, false)
     
     val showLikedPlaylist = showLiked && matchesNormalizedQuery(normalizedQuery, likedPlaylist.playlist.name)
     val showDownloadedPlaylist =
@@ -232,60 +238,38 @@ fun LibraryMixScreen(
     val showCachedPlaylists = showCached && matchesNormalizedQuery(normalizedQuery, cachedPlaylist.playlist.name)
 
 
-    val albums = viewModel.albums.collectAsStateWithLifecycle()
-    val artist = viewModel.artists.collectAsStateWithLifecycle()
     val songs = viewModel.songs.collectAsStateWithLifecycle()
     val playlist = viewModel.playlists.collectAsStateWithLifecycle()
 
-    var allItems = albums.value + artist.value + playlist.value
+    // The custom Library landing view only displays saved YouTube playlists.
+    // Cache filtering and sorting until playlist data or sort preferences change:
+    // playback-state recompositions must not re-sort the entire Library.
+    val savedPlaylists = playlist.value
     val locale = LocalLocale.current.platformLocale
     val collator = remember(locale) {
         Collator.getInstance(locale).apply {
             strength = Collator.PRIMARY
         }
     }
-    allItems =
+    val allItems = remember(savedPlaylists, sortType, sortDescending, collator) {
+        val youtubePlaylists = savedPlaylists.filter { it.playlist.browseId != null }
         when (sortType) {
-            MixSortType.CREATE_DATE -> {
-                allItems.sortedBy { item ->
-                    when (item) {
-                        is Album -> item.album.bookmarkedAt
-                        is Artist -> item.artist.bookmarkedAt
-                        is Playlist -> item.playlist.createdAt
-                        is Song -> LocalDateTime.now()
-                    }
-                }
-            }
-
-            MixSortType.NAME -> {
-                allItems.sortedWith(
-                    compareBy(collator) { item ->
-                        when (item) {
-                            is Album -> item.album.title
-                            is Artist -> item.artist.name
-                            is Playlist -> item.playlist.name
-                            is Song -> ""
-                        }
-                    },
-                )
-            }
-
-            MixSortType.LAST_UPDATED -> {
-                allItems.sortedBy { item ->
-                    when (item) {
-                        is Album -> item.album.lastUpdateTime
-                        is Artist -> item.artist.lastUpdateTime
-                        is Playlist -> item.playlist.lastUpdateTime
-                        is Song -> LocalDateTime.now()
-                    }
-                }
-            }
+            MixSortType.CREATE_DATE -> youtubePlaylists.sortedBy { it.playlist.createdAt }
+            MixSortType.NAME -> youtubePlaylists.sortedWith(compareBy(collator) { it.playlist.name })
+            MixSortType.LAST_UPDATED -> youtubePlaylists.sortedBy { it.playlist.lastUpdateTime }
         }.reversed(sortDescending)
+    }
 
-    val searchableItems = if (normalizedQuery.isBlank()) allItems else allItems + songs.value
+    val searchableItems: List<LocalItem> = remember(allItems, songs.value, normalizedQuery) {
+        if (normalizedQuery.isBlank()) allItems else allItems + songs.value
+    }
 
     val filteredItems = remember(searchableItems, normalizedQuery, collator) {
-        val matchedItems =
+        // All entries match an empty query; avoid allocating a second list
+        // and testing every playlist name on the normal Library landing view.
+        val matchedItems = if (normalizedQuery.isBlank()) {
+            searchableItems
+        } else {
             searchableItems.filter { item ->
                 when (item) {
                     is Song -> {
@@ -302,6 +286,7 @@ fun LibraryMixScreen(
                     is Playlist -> matchesNormalizedQuery(normalizedQuery, item.playlist.name)
                 }
             }
+        }
 
         if (normalizedQuery.isBlank()) {
             matchedItems.distinctBy { it.id }

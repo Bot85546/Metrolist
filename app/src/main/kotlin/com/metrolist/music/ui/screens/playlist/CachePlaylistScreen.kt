@@ -71,7 +71,6 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.media3.exoplayer.offline.Download
 import androidx.media3.exoplayer.offline.DownloadService
 import androidx.navigation.NavController
-import coil3.compose.AsyncImage
 import com.metrolist.music.LocalDownloadUtil
 import com.metrolist.music.LocalPlayerAwareWindowInsets
 import com.metrolist.music.LocalPlayerConnection
@@ -86,6 +85,8 @@ import com.metrolist.music.playback.queues.ListQueue
 import com.metrolist.music.ui.component.DraggableScrollbar
 import com.metrolist.music.ui.component.EmptyPlaceholder
 import com.metrolist.music.ui.component.IconButton
+import com.metrolist.music.ui.component.LibraryCategory
+import com.metrolist.music.ui.component.LibraryCategoryThumbnail
 import com.metrolist.music.ui.component.LocalMenuState
 import com.metrolist.music.ui.component.SongListItem
 import com.metrolist.music.ui.component.SortHeader
@@ -497,11 +498,10 @@ private fun CachePlaylistHeader(
                     ),
                 shape = RoundedCornerShape(3.dp)
             ) {
-                AsyncImage(
-                    model = songs.first().thumbnailUrl,
-                    contentDescription = null,
-                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
+                LibraryCategoryThumbnail(
+                    category = LibraryCategory.CACHED,
+                    size = 240.dp,
+                    shape = RoundedCornerShape(3.dp),
                 )
             }
         }

@@ -82,6 +82,7 @@ import com.metrolist.music.constants.SeekExtraSeconds
 import com.metrolist.music.constants.SwipeThumbnailKey
 import com.metrolist.music.constants.ThumbnailCornerRadius
 import com.metrolist.music.listentogether.RoomRole
+import com.metrolist.music.ui.utils.resize
 import com.metrolist.music.ui.component.CastButton
 import com.metrolist.music.utils.rememberEnumPreference
 import com.metrolist.music.utils.rememberPreference
@@ -564,11 +565,13 @@ private fun ThumbnailItem(
             if (hidePlayerThumbnail) {
                 HiddenThumbnailPlaceholder(textBackgroundColor = textBackgroundColor)
             } else {
-                val artworkUriToUse = if (item.mediaId == currentMediaId && !currentMediaThumbnail.isNullOrBlank()) {
+                val isCurrentSong = item.mediaId == currentMediaId
+                val artworkUri = if (isCurrentSong && !currentMediaThumbnail.isNullOrBlank()) {
                     currentMediaThumbnail
                 } else {
                     item.mediaMetadata.artworkUri?.toString()
                 }
+                val artworkUriToUse = playerArtworkUrl(artworkUri, isCurrentSong)
 
                 ThumbnailImage(
                     artworkUri = artworkUriToUse,
@@ -610,6 +613,11 @@ private fun HiddenThumbnailPlaceholder(
     }
 }
 
+internal fun playerArtworkUrl(artworkUri: String?, isCurrentSong: Boolean): String? {
+    val targetSize = if (isCurrentSong) 1080 else 200
+    return artworkUri?.resize(targetSize, targetSize)
+}
+
 /**
  * Actual thumbnail image with caching and hardware layer rendering.
  */
@@ -619,6 +627,15 @@ private fun ThumbnailImage(
     cropArtwork: Boolean,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val imageRequest = remember(context, artworkUri) {
+        ImageRequest.Builder(context)
+            .data(artworkUri)
+            .memoryCachePolicy(CachePolicy.ENABLED)
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .networkCachePolicy(CachePolicy.ENABLED)
+            .build()
+    }
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -629,12 +646,7 @@ private fun ThumbnailImage(
             .background(MaterialTheme.colorScheme.surfaceVariant)
     ) {
         AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current)
-                .data(artworkUri)
-                .memoryCachePolicy(CachePolicy.ENABLED)
-                .diskCachePolicy(CachePolicy.ENABLED)
-                .networkCachePolicy(CachePolicy.ENABLED)
-                .build(),
+            model = imageRequest,
             contentDescription = null,
             contentScale = if (cropArtwork) ContentScale.Crop else ContentScale.Fit,
             modifier = Modifier.fillMaxSize()
