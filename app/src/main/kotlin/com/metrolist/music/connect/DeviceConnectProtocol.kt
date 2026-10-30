@@ -9,6 +9,7 @@ data class DeviceTrack(
     val title: String,
     val artist: String,
     val artwork: String? = null,
+    val durationSeconds: Int = 0,
 )
 
 @Serializable

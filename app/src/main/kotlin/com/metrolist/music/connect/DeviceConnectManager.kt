@@ -12,6 +12,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import com.metrolist.music.playback.queues.Queue
+import com.metrolist.music.extensions.metadata
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -418,6 +419,7 @@ class DeviceConnectManager @Inject constructor(
         item.mediaMetadata.title?.toString().orEmpty(),
         item.mediaMetadata.artist?.toString().orEmpty(),
         item.mediaMetadata.artworkUri?.toString(),
+        item.metadata?.duration?.coerceAtLeast(0) ?: 0,
     )
 
     override fun discovered(endpointId: String, endpointName: String) {
@@ -825,28 +827,13 @@ class DeviceConnectManager @Inject constructor(
         val currentIndex = target.currentMediaItemIndex
         val start = (currentIndex - 2).coerceAtLeast(0)
         val end = (start + 25).coerceAtMost(target.mediaItemCount)
-        val queue = (start until end).map { index ->
-            val item = target.getMediaItemAt(index)
-            DeviceTrack(
-                item.mediaId,
-                item.mediaMetadata.title?.toString().orEmpty(),
-                item.mediaMetadata.artist?.toString().orEmpty(),
-                item.mediaMetadata.artworkUri?.toString(),
-            )
-        }
+        val queue = (start until end).map { index -> asDeviceTrack(target.getMediaItemAt(index)) }
         send(
             DeviceConnectPacket(
                 type = "STATE",
                 state = DevicePlaybackState(
                     revision = revision,
-                    track = current?.let {
-                        DeviceTrack(
-                            it.mediaId,
-                            it.mediaMetadata.title?.toString().orEmpty(),
-                            it.mediaMetadata.artist?.toString().orEmpty(),
-                            it.mediaMetadata.artworkUri?.toString(),
-                        )
-                    },
+                    track = current?.let(::asDeviceTrack),
                     playing = target.isPlaying,
                     positionMs = target.currentPosition.coerceAtLeast(0),
                     durationMs = target.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0,

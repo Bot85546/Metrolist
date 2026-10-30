@@ -284,7 +284,7 @@ internal fun DeviceTrack.asMediaItem(durationMs: Long): MediaItem =
         id = id,
         title = title,
         artists = listOf(MetrolittMetadata.Artist(null, artist)),
-        duration = (durationMs / 1000L).toInt(),
+        duration = if (durationMs > 0L) (durationMs / 1000L).toInt() else durationSeconds,
         thumbnailUrl = artwork,
     ).toMediaItem()
 
@@ -298,10 +298,12 @@ private class RemoteQueueTimeline(
     override fun getPeriodCount(): Int = entries.size
 
     override fun getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Long): Window {
-        val durationUs = if (windowIndex == currentIndex && currentDurationMs > 0) currentDurationMs * 1000 else C.TIME_UNSET
+        val durationMs = if (windowIndex == currentIndex && currentDurationMs > 0) currentDurationMs
+            else entries[windowIndex].durationSeconds.toLong() * 1000L
+        val durationUs = if (durationMs > 0) durationMs * 1000 else C.TIME_UNSET
         return window.set(
             windowIndex,
-            entries[windowIndex].asMediaItem(if (durationUs > 0) currentDurationMs else 0),
+            entries[windowIndex].asMediaItem(durationMs),
             null,
             C.TIME_UNSET,
             C.TIME_UNSET,
