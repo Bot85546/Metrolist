@@ -241,9 +241,7 @@ class MainActivity : FragmentActivity() {
     companion object {
         private const val ACTION_SEARCH = "com.metrolist.music.action.SEARCH"
         private const val ACTION_LIBRARY = "com.metrolist.music.action.LIBRARY"
-        const val ACTION_RECOGNITION = "com.metrolist.music.action.RECOGNITION"
         const val ACTION_OPEN_WIDGET_TARGET = "com.metrolist.music.action.OPEN_WIDGET_TARGET"
-        const val EXTRA_AUTO_START_RECOGNITION = "auto_start_recognition"
         const val EXTRA_WIDGET_TARGET_TYPE = "widget_target_type"
         const val EXTRA_WIDGET_TARGET_ID = "widget_target_id"
     }
@@ -907,13 +905,6 @@ class MainActivity : FragmentActivity() {
 
                     topAppBarScrollBehavior.state.resetHeightOffset()
 
-                    // Collapse player when navigating to equalizer
-                    if (navBackStackEntry?.destination?.route == "equalizer" &&
-                        playerBottomSheetState.isExpanded
-                    ) {
-                        playerBottomSheetState.collapseSoft()
-                    }
-
                     // Track previous tab for animations
                     navController.currentBackStackEntry?.destination?.route?.let {
                         setPreviousTab(it)
@@ -978,12 +969,10 @@ class MainActivity : FragmentActivity() {
                 LaunchedEffect(Unit) {
                     if (pendingIntent != null) {
                         handleWidgetTargetIntent(pendingIntent!!, navController)
-                        handleRecognitionIntent(pendingIntent!!, navController)
                         handleDeepLinkIntent(pendingIntent!!, navController)
                         pendingIntent = null
                     } else {
                         handleWidgetTargetIntent(intent, navController)
-                        handleRecognitionIntent(intent, navController)
                         handleDeepLinkIntent(intent, navController)
                     }
                 }
@@ -992,7 +981,6 @@ class MainActivity : FragmentActivity() {
                     val listener =
                         Consumer<Intent> { intent ->
                             handleWidgetTargetIntent(intent, navController)
-                            handleRecognitionIntent(intent, navController)
                             handleDeepLinkIntent(intent, navController)
                         }
 
@@ -1179,15 +1167,6 @@ class MainActivity : FragmentActivity() {
                                     }
                                 }
 
-                            val onSearchLongClick: () -> Unit =
-                                remember(navController) {
-                                    {
-                                        navController.navigate("recognition") {
-                                            launchSingleTop = true
-                                        }
-                                    }
-                                }
-
                             // Pre-calculate values for graphicsLayer to avoid reading state during composition
                             val navBarTotalHeight = bottomInset + NavigationBarHeight
 
@@ -1207,7 +1186,6 @@ class MainActivity : FragmentActivity() {
                                         onItemClick = onNavItemClick,
                                         pureBlack = pureBlack,
                                         slimNav = slimNav,
-                                        onSearchLongClick = onSearchLongClick,
                                         onHomeLongHold = { showAccountDialog = true },
                                         modifier =
                                             Modifier
@@ -1309,22 +1287,12 @@ class MainActivity : FragmentActivity() {
                                     }
                                 }
 
-                            val onRailSearchLongClick: () -> Unit =
-                                remember(navController) {
-                                    {
-                                        navController.navigate("recognition") {
-                                            launchSingleTop = true
-                                        }
-                                    }
-                                }
-
                             if (showRail && currentRoute != "wrapped") {
                                 AppNavigationRail(
                                     navigationItems = navigationItems,
                                     currentRoute = currentRoute,
                                     onItemClick = onRailItemClick,
                                     pureBlack = pureBlack,
-                                    onSearchLongClick = onRailSearchLongClick,
                                     onHomeLongHold = { showAccountDialog = true },
                                 )
                             }
@@ -1513,23 +1481,6 @@ class MainActivity : FragmentActivity() {
                 }
             }
             }
-        }
-    }
-
-    /**
-     * Handles the ACTION_RECOGNITION intent sent from the Music Recognizer Widget.
-     * Always navigates to the recognition screen to show the result.
-     */
-    private fun handleRecognitionIntent(
-        intent: Intent,
-        navController: NavHostController,
-    ) {
-        if (intent.action != ACTION_RECOGNITION) return
-        val autoStart = intent.getBooleanExtra(EXTRA_AUTO_START_RECOGNITION, false)
-        intent.action = null
-        intent.removeExtra(EXTRA_AUTO_START_RECOGNITION)
-        navController.navigate(if (autoStart) "recognition?autoStart=true" else "recognition") {
-            launchSingleTop = true
         }
     }
 

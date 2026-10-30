@@ -150,9 +150,6 @@ import com.metrolist.music.db.entities.RelatedSongMap
 import com.metrolist.music.db.entities.Song
 import com.metrolist.music.di.DownloadCache
 import com.metrolist.music.di.PlayerCache
-import com.metrolist.music.eq.EqualizerService
-import com.metrolist.music.eq.audio.CustomEqualizerAudioProcessor
-import com.metrolist.music.eq.data.EQProfileRepository
 import com.metrolist.music.extensions.SilentHandler
 import com.metrolist.music.extensions.collect
 import com.metrolist.music.extensions.collectLatest
@@ -256,12 +253,6 @@ class MusicService :
 
     @Inject
     lateinit var mediaLibrarySessionCallback: MediaLibrarySessionCallback
-
-    @Inject
-    lateinit var equalizerService: EqualizerService
-
-    @Inject
-    lateinit var eqProfileRepository: EQProfileRepository
 
     @Inject
     lateinit var widgetManager: MetrolistWidgetManager
@@ -399,7 +390,6 @@ class MusicService :
     private var openedAudioEffectSessionId: Int = C.AUDIO_SESSION_ID_UNSET
     private val historyReporters = HashMap<Player, YouTubeHistoryReporter>()
     private val playerNormalizationProcessors = HashMap<Player, VolumeNormalizationAudioProcessor>()
-    private val playerEqualizerProcessors = HashMap<Player, CustomEqualizerAudioProcessor>()
     // The stream resolver records loudness for both active and prebuffered tracks.
     // Player changes must not require another database round-trip for the gain.
     private val trackLoudnessCache = TrackLoudnessCache()
@@ -668,24 +658,6 @@ class MusicService :
 
         // Collecting this flow activates the internal map that updates lyricsProviders in LyricsHelper
         lyricsHelper.preferred.collectLatest(scope) {}
-
-        // 4. Watch for EQ profile changes
-        scope.launch {
-            eqProfileRepository.activeProfile.collect { profile ->
-                if (profile != null) {
-                    val result = equalizerService.applyProfile(profile)
-                    if (result.isSuccess && player.playbackState == Player.STATE_READY && player.isPlaying) {
-                        // Instant update: flush buffers and seek slightly to re-process audio
-                        player.seekTo(player.currentPosition)
-                    }
-                } else {
-                    equalizerService.disable()
-                    if (player.playbackState == Player.STATE_READY && player.isPlaying) {
-                        player.seekTo(player.currentPosition)
-                    }
-                }
-            }
-        }
 
         scope.launch {
             connectivityObserver.networkStatus.collect { isConnected ->
@@ -1073,8 +1045,6 @@ class MusicService :
     private fun createExoPlayer(prefs: Preferences? = null): ExoPlayer {
         val normalizationProcessor = VolumeNormalizationAudioProcessor()
         applyAudioNormalization(normalizationProcessor, null, null, immediate = true)
-        val eqProcessor = CustomEqualizerAudioProcessor()
-
         val silenceProcessor = SilenceDetectorAudioProcessor { handleLongSilenceDetected() }
 
         // Set initial state — use pre-read prefs when available, otherwise fall back to DataStore
@@ -1099,7 +1069,7 @@ class MusicService :
                 .setMediaSourceFactory(
                     createMediaSourceFactory(normalizationProcessor) { createdPlayer },
                 )
-                .setRenderersFactory(createRenderersFactory(normalizationProcessor, eqProcessor, silenceProcessor, useAudioTrackPlaybackParams))
+                .setRenderersFactory(createRenderersFactory(normalizationProcessor, silenceProcessor, useAudioTrackPlaybackParams))
                 .setLoadControl(
                     // Start playback once ~750ms is buffered (media3's default is 1000ms) so first
                     // audio is audible a touch sooner. min/max/after-rebuffer match the media3 1.x
@@ -1126,9 +1096,6 @@ class MusicService :
 
         playerNormalizationProcessors[player] = normalizationProcessor
         playerSilenceProcessors[player] = silenceProcessor
-        playerEqualizerProcessors[player] = eqProcessor
-        equalizerService.addAudioProcessor(eqProcessor)
-
         if (prefs != null) {
             val offload = prefs[AudioOffload] ?: false
             val crossfade = prefs[CrossfadeEnabledKey] ?: false
@@ -3505,7 +3472,6 @@ class MusicService :
 
     private fun createRenderersFactory(
         normalizationProcessor: VolumeNormalizationAudioProcessor,
-        eqProcessor: CustomEqualizerAudioProcessor,
         silenceProcessor: SilenceDetectorAudioProcessor,
         useAudioTrackPlaybackParams: Boolean,
     ) = object : DefaultRenderersFactory(this) {
@@ -3568,7 +3534,6 @@ class MusicService :
                 DefaultAudioSink.DefaultAudioProcessorChain(
                     arrayOf(
                         normalizationProcessor,
-                        eqProcessor,
                         silenceProcessor,
                     ),
                     SilenceSkippingAudioProcessor(2_000_000, 20_000, 256),
@@ -4511,7 +4476,6 @@ class MusicService :
         historyReporters.remove(player)?.close()
         playerNormalizationProcessors.remove(player)
         playerSilenceProcessors.remove(player)
-        playerEqualizerProcessors.remove(player)?.let(equalizerService::removeAudioProcessor)
         player.release()
     }
 
@@ -4575,7 +4539,7 @@ internal fun fallbackNormalizationGainMb(targetLufs: Float): Int =
 
 /**
  * Offload plays encoded audio directly and bypasses the Media3 PCM
- * AudioProcessorChain (normalization, equalizer and silence detection).
+ * AudioProcessorChain (normalization and silence detection).
  * Per-track gain must never silently disappear on offload-capable formats.
  * Preserve opt-in offload only when normalization and crossfade are both off.
  */

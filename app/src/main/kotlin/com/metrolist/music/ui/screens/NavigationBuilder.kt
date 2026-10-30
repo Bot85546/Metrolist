@@ -29,8 +29,6 @@ import com.metrolist.music.ui.screens.artist.ArtistAlbumsScreen
 import com.metrolist.music.ui.screens.artist.ArtistItemsScreen
 import com.metrolist.music.ui.screens.artist.ArtistScreen
 import com.metrolist.music.ui.screens.artist.ArtistSongsScreen
-import com.metrolist.music.ui.screens.equalizer.EqScreen
-import com.metrolist.music.ui.screens.equalizer.wizard.WizardScreen
 import com.metrolist.music.ui.screens.library.LibraryScreen
 import com.metrolist.music.ui.screens.playlist.AutoPlaylistScreen
 import com.metrolist.music.ui.screens.playlist.CachePlaylistScreen
@@ -38,8 +36,6 @@ import com.metrolist.music.ui.screens.playlist.LocalPlaylistScreen
 import com.metrolist.music.ui.screens.playlist.OnlinePlaylistScreen
 import com.metrolist.music.ui.screens.playlist.TopPlaylistScreen
 import com.metrolist.music.ui.screens.podcast.OnlinePodcastScreen
-import com.metrolist.music.ui.screens.recognition.RecognitionHistoryScreen
-import com.metrolist.music.ui.screens.recognition.RecognitionScreen
 import com.metrolist.music.ui.screens.search.OnlineSearchResult
 import com.metrolist.music.ui.screens.search.SearchScreen
 import com.metrolist.music.ui.screens.settings.AboutScreen
@@ -413,32 +409,6 @@ fun NavGraphBuilder.navigationBuilder(
         WrappedScreen()
     }
 
-    composable("equalizer") {
-        EqScreen()
-    }
-
-    composable("eq_wizard") {
-        WizardScreen(onNavigateBack = {
-            navController.popBackStack()
-        })
-    }
-
-    composable(
-        route = "recognition?autoStart={autoStart}",
-        arguments =
-            listOf(
-                navArgument("autoStart") {
-                    type = NavType.BoolType
-                    defaultValue = false
-                },
-            ),
-    ) {
-        RecognitionScreen(navController, it.arguments?.getBoolean("autoStart") ?: false)
-    }
-
-    composable("recognition_history") {
-        RecognitionHistoryScreen(navController)
-    }
     composable("settings/android_auto") {
         AndroidAutoSettings(navController)
     }
