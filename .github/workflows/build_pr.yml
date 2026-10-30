@@ -77,8 +77,6 @@ jobs:
           METROLIST_DEBUG_KEYSTORE_PATH: pr-debug.keystore
           METROLIST_BUILD_COMMIT: ${{ github.sha }}
           PULL_REQUEST: "true"
-          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
-          LASTFM_SECRET: ${{ secrets.LASTFM_SECRET }}
 
       # Sign the R8-minified release with the *same* persisted PR key as
       # previous Metrolitt debug APKs, so Android can update in-place without

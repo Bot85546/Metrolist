@@ -737,10 +737,6 @@ fun PlayerSettings(
             }
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        AlarmSettingsSection()
-
         Spacer(modifier = Modifier.height(27.dp))
 
         Material3SettingsGroup(
