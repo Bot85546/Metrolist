@@ -634,6 +634,25 @@ class MusicService :
                     ),
                 ).setBitmapLoader(sessionArtworkLoader)
                 .build()
+        deviceConnectManager.onRemoteLibraryCommand = { action ->
+            when (action) {
+                "TOGGLE_LIKE" -> toggleLike()
+                "TOGGLE_LIBRARY" -> toggleLibrary()
+            }
+        }
+        scope.launch {
+            deviceConnectManager.state.collect {
+                val session = mediaSession ?: return@collect
+                val desired = if (deviceConnectManager.isRemoteActive) {
+                    deviceConnectManager.remoteMirrorPlayer ?: player
+                } else {
+                    player
+                }
+                if (session.player !== desired) {
+                    session.player = desired
+                }
+            }
+        }
         player.repeatMode = startupPrefs!![RepeatModeKey] ?: REPEAT_MODE_OFF
 
         if (startupPrefs!![RememberShuffleAndRepeatKey] ?: true) {
@@ -3805,6 +3824,7 @@ class MusicService :
     }
 
     override fun onDestroy() {
+        deviceConnectManager.onRemoteLibraryCommand = null
         isRunning = false
 
         if (!::player.isInitialized) {

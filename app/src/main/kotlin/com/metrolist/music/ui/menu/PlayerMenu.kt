@@ -686,7 +686,7 @@ fun PlayerMenu(
                                         )
                                     },
                                     onClick = {
-                                        val audioSessionId = playerConnection.player.audioSessionId
+                                        val audioSessionId = playerConnection.localPlayer.audioSessionId
                                         if (audioSessionId != C.AUDIO_SESSION_ID_UNSET && audioSessionId > 0) {
                                             val intent = Intent(AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL).apply {
                                                 putExtra(AudioEffect.EXTRA_AUDIO_SESSION, audioSessionId)

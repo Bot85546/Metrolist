@@ -189,7 +189,6 @@ import com.metrolist.music.ui.component.rememberBottomSheetState
 import com.metrolist.music.ui.component.shimmer.ShimmerTheme
 import com.metrolist.music.ui.menu.YouTubeSongMenu
 import com.metrolist.music.ui.player.BottomSheetPlayer
-import com.metrolist.music.ui.player.RemoteBottomSheetPlayer
 import com.metrolist.music.ui.screens.Screens
 import com.metrolist.music.ui.screens.navigationBuilder
 import com.metrolist.music.ui.screens.settings.ChangelogScreen
@@ -282,7 +281,7 @@ class MainActivity : FragmentActivity() {
                 service: IBinder?,
             ) {
                 if (service is MusicBinder) {
-                    playerConnection = PlayerConnection(this@MainActivity, service, database, lifecycleScope)
+                    playerConnection = PlayerConnection(this@MainActivity, service, database, lifecycleScope, deviceConnectManager)
                     playerConnectionSnapshot = playerConnection
                     listenTogetherManager.setPlayerConnection(playerConnection)
                 }
@@ -854,13 +853,7 @@ class MainActivity : FragmentActivity() {
                 val playerReady by playerReadyState
                 val activePlayerConnection = if (playerReady) playerConnection else null
                 val deviceConnectUi by deviceConnectManager.state.collectAsStateWithLifecycle()
-                val localIsPlaying by (
-                    activePlayerConnection?.isPlaying?.collectAsStateWithLifecycle()
-                        ?: remember { mutableStateOf(false) }
-                )
-                val remotePlayback = deviceConnectUi.remotePlayback
-                val showRemotePlayer =
-                    deviceConnectUi.connected && remotePlayback?.track != null && !localIsPlaying
+                val isRemoteMirror = deviceConnectManager.isRemoteActive
 
                 val playerAwareWindowInsets =
                     remember(
@@ -925,8 +918,8 @@ class MainActivity : FragmentActivity() {
                     }
                 }
 
-                LaunchedEffect(activePlayerConnection, showRemotePlayer) {
-                    if (showRemotePlayer) {
+                LaunchedEffect(activePlayerConnection, isRemoteMirror, deviceConnectUi.remotePlayback?.track?.id) {
+                    if (isRemoteMirror) {
                         if (playerBottomSheetState.isDismissed) playerBottomSheetState.collapseSoft()
                         return@LaunchedEffect
                     }
@@ -1078,13 +1071,22 @@ class MainActivity : FragmentActivity() {
                                                     contentDescription = stringResource(R.string.stats),
                                                 )
                                             }
-                                            if (listenTogetherInTopBar) {
-                                                IconButton(onClick = { navController.navigate("listen_together_from_topbar") }) {
-                                                    Icon(
-                                                        painter = painterResource(R.drawable.group_outlined),
-                                                        contentDescription = stringResource(R.string.together),
-                                                    )
+                                            IconButton(onClick = {
+                                                when {
+                                                    deviceConnectUi.connected -> deviceConnectManager.disconnect()
+                                                    deviceConnectUi.trustedDeviceName != null -> deviceConnectManager.connectToTrustedDevice()
+                                                    else -> navController.navigate("settings/device_connect")
                                                 }
+                                            }) {
+                                                Icon(
+                                                    painter = painterResource(R.drawable.link),
+                                                    contentDescription = stringResource(
+                                                        if (deviceConnectUi.connected) R.string.device_connect_disconnect
+                                                        else R.string.device_connect_connect,
+                                                    ),
+                                                    tint = if (deviceConnectUi.connected) MaterialTheme.colorScheme.primary
+                                                        else LocalContentColor.current,
+                                                )
                                             }
                                             IconButton(onClick = { showAccountDialog = true }) {
                                                 BadgedBox(badge = {
@@ -1191,13 +1193,7 @@ class MainActivity : FragmentActivity() {
 
                             if (!showRail && currentRoute != "wrapped") {
                                 Box {
-                                    if (showRemotePlayer) {
-                                        RemoteBottomSheetPlayer(
-                                            state = playerBottomSheetState,
-                                            manager = deviceConnectManager,
-                                            peerName = deviceConnectUi.peerName.orEmpty(),
-                                        )
-                                    } else if (activePlayerConnection != null) {
+                                    if (activePlayerConnection != null) {
                                         BottomSheetPlayer(
                                             state = playerBottomSheetState,
                                             navController = navController,
@@ -1258,13 +1254,7 @@ class MainActivity : FragmentActivity() {
                                 }
                             } else {
                                 if (currentRoute != "wrapped") {
-                                    if (showRemotePlayer) {
-                                        RemoteBottomSheetPlayer(
-                                            state = playerBottomSheetState,
-                                            manager = deviceConnectManager,
-                                            peerName = deviceConnectUi.peerName.orEmpty(),
-                                        )
-                                    } else if (activePlayerConnection != null) {
+                                    if (activePlayerConnection != null) {
                                         BottomSheetPlayer(
                                             state = playerBottomSheetState,
                                             navController = navController,

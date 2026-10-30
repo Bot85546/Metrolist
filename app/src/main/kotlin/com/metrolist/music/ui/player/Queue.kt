@@ -712,8 +712,8 @@ fun Queue(
 
                     if (!playerConnection.player.shuffleModeEnabled) {
                         playerConnection.player.moveMediaItem(safeFrom, safeTo)
-                    } else {
-                        playerConnection.player.setShuffleOrder(
+                    } else if (playerConnection.player === playerConnection.localPlayer) {
+                        playerConnection.localPlayer.setShuffleOrder(
                             DefaultShuffleOrder(
                                 queueWindows
                                     .map { it.firstPeriodIndex }

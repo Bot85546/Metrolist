@@ -77,6 +77,13 @@ class DeviceConnectManager @Inject constructor(
     val state = _state.asStateFlow()
 
     private var player: Player? = null
+    var remoteMirrorPlayer: RemoteMirrorPlayer? = null
+        private set
+    var onRemoteLibraryCommand: ((String) -> Unit)? = null
+
+    val isRemoteActive: Boolean
+        get() = authenticated && _state.value.remotePlayback?.track != null &&
+            player?.isPlaying != true && player?.playWhenReady != true
     private var foreground = false
     private var pairingMode = false
     private var manuallyDisconnected = false
@@ -126,6 +133,7 @@ class DeviceConnectManager @Inject constructor(
         if (player === target) return
         player?.removeListener(playerListener)
         player = target
+        remoteMirrorPlayer = RemoteMirrorPlayer(target, this)
         target.addListener(playerListener)
         revision++
         updateTransport()
@@ -134,6 +142,7 @@ class DeviceConnectManager @Inject constructor(
     fun detachPlayer(target: Player) {
         if (player !== target) return
         target.removeListener(playerListener)
+        remoteMirrorPlayer = null
         player = null
         revision++
         if (authenticated) {
@@ -146,7 +155,6 @@ class DeviceConnectManager @Inject constructor(
         if (foreground == value) return
         foreground = value
         if (value) {
-            manuallyDisconnected = false
             reconnectAttempts = 0
             reconnectGeneration++
             discoveryUntilMs = SystemClock.elapsedRealtime() + DISCOVERY_WINDOW_MS
@@ -188,6 +196,8 @@ class DeviceConnectManager @Inject constructor(
         _state.value = _state.value.copy(status = "Searching for paired device…")
         updateTransport()
     }
+
+    fun connectToTrustedDevice() = searchAgain()
 
     fun acceptPairing() {
         val request = _state.value.pairingRequest ?: return
@@ -374,9 +384,11 @@ class DeviceConnectManager @Inject constructor(
                 val snapshot = packet.state ?: return
                 if (snapshot.revision < latestRemoteRevision) return
                 latestRemoteRevision = snapshot.revision
+                val oldSnapshot = _state.value.remotePlayback
                 _state.value = _state.value.copy(
                     remotePlayback = snapshot.copy(updatedAtMs = SystemClock.elapsedRealtime()),
                 )
+                remoteMirrorPlayer?.notifyStateChanged(oldSnapshot, _state.value.remotePlayback)
             }
             "COMMAND" -> {
                 if (!authenticated || packet.requestId.isBlank()) return
@@ -417,9 +429,22 @@ class DeviceConnectManager @Inject constructor(
                 if (packet.argument != index.toLong() || index !in 0 until target.mediaItemCount) return
                 target.seekTo(index, 0L)
             }
+            "REMOVE_QUEUE" -> {
+                val index = packet.argument.toInt()
+                if (index.toLong() != packet.argument || index !in 0 until target.mediaItemCount) return
+                target.removeMediaItem(index)
+            }
+            "MOVE_QUEUE" -> {
+                val from = (packet.argument ushr 32).toInt()
+                val to = packet.argument.toInt()
+                if (from !in 0 until target.mediaItemCount || to !in 0 until target.mediaItemCount) return
+                target.moveMediaItem(from, to)
+            }
             "SEEK" -> target.seekTo(packet.argument.coerceIn(0, target.duration.takeIf { it > 0 } ?: Long.MAX_VALUE))
             "SHUFFLE" -> target.shuffleModeEnabled = !target.shuffleModeEnabled
             "REPEAT" -> target.repeatMode = (target.repeatMode + 1) % 3
+            "SET_REPEAT" -> if (packet.argument in 0L..2L) target.repeatMode = packet.argument.toInt()
+            "TOGGLE_LIKE", "TOGGLE_LIBRARY" -> onRemoteLibraryCommand?.invoke(packet.action)
             else -> return
         }
         revision++
@@ -508,7 +533,7 @@ class DeviceConnectManager @Inject constructor(
             return
         }
         val hasSession = player?.isPlaying == true || player?.playWhenReady == true
-        if ((trustedPeer != null && hasSession) || pairingMode) {
+        if ((trustedPeer != null && (hasSession || foreground)) || pairingMode) {
             transport.advertise(ownEndpoint.encode())
         } else {
             transport.stopAdvertising()
@@ -551,6 +576,7 @@ class DeviceConnectManager @Inject constructor(
         }
 
     private fun resetConnection(closeEndpoint: Boolean) {
+        val previous = _state.value.remotePlayback
         val id = endpointId
         if (id != null && closeEndpoint) transport.disconnect(id)
         endpointId = null
@@ -567,6 +593,7 @@ class DeviceConnectManager @Inject constructor(
         _state.value = _state.value.copy(
             connected = false, peerName = null, remotePlayback = null, pairingRequest = null,
         )
+        remoteMirrorPlayer?.notifyStateChanged(previous, null)
         scheduleReconnect()
     }
 

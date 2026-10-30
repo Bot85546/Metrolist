@@ -7,6 +7,7 @@
     <string name="device_connect_pair">Pair another device</string>
     <string name="device_connect_search">Search again</string>
     <string name="device_connect_disconnect">Disconnect</string>
+    <string name="device_connect_connect">Connect paired device</string>
     <string name="device_connect_forget">Forget paired device</string>
     <string name="device_connect_pair_title">Confirm pairing code</string>
     <string name="device_connect_pair_description">Check that this code matches on both devices. Only accept if it matches.</string>

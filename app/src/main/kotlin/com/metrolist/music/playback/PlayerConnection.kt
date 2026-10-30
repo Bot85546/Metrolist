@@ -32,6 +32,8 @@ import com.metrolist.music.extensions.metadata
 import com.metrolist.music.extensions.togglePlayPause
 import com.metrolist.music.extensions.withUpdatedMetadata
 import com.metrolist.music.models.toMediaMetadata
+import com.metrolist.music.connect.DeviceConnectManager
+import com.metrolist.music.models.MediaMetadata
 import com.metrolist.music.playback.MusicService.MusicBinder
 import com.metrolist.music.playback.queues.Queue
 import com.metrolist.music.utils.dataStore
@@ -57,6 +59,7 @@ class PlayerConnection(
     binder: MusicBinder,
     val database: MusicDatabase,
     scope: CoroutineScope,
+    private val deviceConnectManager: DeviceConnectManager,
 ) : Player.Listener {
     private companion object {
         private const val TAG = "PlayerConnection"
@@ -91,8 +94,13 @@ class PlayerConnection(
             null
         }
 
-    val player: ExoPlayer
+    val localPlayer: ExoPlayer
         get() = getPlayerSafe()
+
+    val player: Player
+        get() = if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.remoteMirrorPlayer ?: getPlayerSafe()
+        } else getPlayerSafe()
 
     /** Tracks whether player initialization completed successfully */
     private val isPlayerInitialized = MutableStateFlow(service.isPlayerReady.value)
@@ -209,8 +217,34 @@ class PlayerConnection(
     init {
         scope.launch {
             service.playerFlow.collect { newPlayer ->
-                if (newPlayer != null && newPlayer != attachedPlayer) {
+                if (newPlayer != null && !deviceConnectManager.isRemoteActive && newPlayer != attachedPlayer) {
                     updateAttachedPlayer(newPlayer)
+                }
+            }
+        }
+        scope.launch {
+            deviceConnectManager.state.collect { connection ->
+                val mirror = deviceConnectManager.remoteMirrorPlayer
+                val useRemote = deviceConnectManager.isRemoteActive && mirror != null
+                val desired: Player? = if (useRemote) mirror else getPlayerOrNull()
+                if (desired != null && desired !== attachedPlayer) updateAttachedPlayer(desired)
+                if (useRemote) {
+                    val snapshot = connection.remotePlayback ?: return@collect
+                    val track = snapshot.track ?: return@collect
+                    mediaMetadata.value = MediaMetadata(
+                        id = track.id,
+                        title = track.title,
+                        artists = listOf(MediaMetadata.Artist(null, track.artist)),
+                        duration = (snapshot.durationMs / 1000L).toInt(),
+                        thumbnailUrl = track.artwork,
+                    )
+                    playbackState.value = Player.STATE_READY
+                    playWhenReady.value = snapshot.playing
+                    repeatMode.value = snapshot.repeatMode
+                    shuffleModeEnabled.value = snapshot.shuffle
+                    currentMediaItemIndex.value = mirror!!.currentMediaItemIndex
+                    canSkipPrevious.value = snapshot.queueIndex > 0
+                    canSkipNext.value = snapshot.queueIndex < snapshot.queueSize - 1
                 }
             }
         }
@@ -318,6 +352,10 @@ class PlayerConnection(
     }
 
     fun toggleLike() {
+        if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.sendCommand("TOGGLE_LIKE")
+            return
+        }
         try {
             service.toggleLike()
         } catch (e: Exception) {
@@ -334,6 +372,10 @@ class PlayerConnection(
     }
 
     fun toggleLibrary() {
+        if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.sendCommand("TOGGLE_LIBRARY")
+            return
+        }
         try {
             service.toggleLibrary()
         } catch (e: Exception) {
@@ -414,6 +456,10 @@ class PlayerConnection(
     }
 
     fun seekToNext() {
+        if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.sendCommand("NEXT")
+            return
+        }
         try {
             // When casting, use Cast skip instead of local player
             val castHandler = service.castConnectionHandler
@@ -435,6 +481,10 @@ class PlayerConnection(
     var onRestartSong: (() -> Unit)? = null
 
     fun seekToPrevious() {
+        if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.sendCommand("PREVIOUS")
+            return
+        }
         try {
             // When casting, use Cast skip instead of local player
             val castHandler = service.castConnectionHandler

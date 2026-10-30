@@ -406,7 +406,7 @@ fun BottomSheetPlayer(
     }
     val gradientColorsCache = remember { mutableMapOf<String, List<Color>>() }
 
-    if (!canSkipNext && automix.isNotEmpty()) {
+    if (!canSkipNext && automix.isNotEmpty() && playerConnection.player === playerConnection.localPlayer) {
         playerConnection.service.addToQueueAutomix(automix[0], 0)
     }
 
