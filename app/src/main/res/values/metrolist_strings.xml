@@ -20,6 +20,8 @@
     <string name="device_connect_shuffle">Shuffle</string>
     <string name="device_connect_repeat">Repeat</string>
     <string name="device_connect_queue">Up next</string>
+    <string name="device_connect_playing_on">Playing on %1$s</string>
+    <string name="device_connect_queue_window">Showing %1$d of %2$d queued tracks</string>
     <string name="local_history">Local</string>
     <string name="remote_history">Remote</string>
 

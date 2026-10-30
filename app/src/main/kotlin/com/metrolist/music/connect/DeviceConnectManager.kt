@@ -81,6 +81,8 @@ class DeviceConnectManager @Inject constructor(
     private var pairingMode = false
     private var manuallyDisconnected = false
     private var discoveryUntilMs = 0L
+    private var reconnectAttempts = 0
+    private var reconnectGeneration = 0L
     private var endpointId: String? = null
     private var peer: DeviceEndpoint? = null
     private var acceptedUntrustedEndpoint: String? = null
@@ -96,6 +98,12 @@ class DeviceConnectManager @Inject constructor(
 
     private val playerListener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
+            if (events.contains(Player.EVENT_IS_PLAYING_CHANGED) &&
+                player.isPlaying && _state.value.remotePlayback?.playing == true
+            ) {
+                // Starting playback here transfers the active role to this device.
+                sendCommand("PAUSE")
+            }
             if (events.containsAny(
                     Player.EVENT_IS_PLAYING_CHANGED,
                     Player.EVENT_PLAY_WHEN_READY_CHANGED,
@@ -139,16 +147,14 @@ class DeviceConnectManager @Inject constructor(
         foreground = value
         if (value) {
             manuallyDisconnected = false
+            reconnectAttempts = 0
+            reconnectGeneration++
             discoveryUntilMs = SystemClock.elapsedRealtime() + DISCOVERY_WINDOW_MS
         } else {
             pairingMode = false
             _state.value = _state.value.copy(pairingMode = false, pairingRequest = null)
-            handler.postDelayed({
-                if (!foreground && player?.isPlaying != true && endpointId != null) {
-                    resetConnection(closeEndpoint = true)
-                    updateTransport()
-                }
-            }, 45_000L)
+            // Keep an established remote-control link after the UI is closed.
+            // Only discovery is stopped: it is unnecessary once paired.
         }
         updateTransport()
     }
@@ -176,6 +182,8 @@ class DeviceConnectManager @Inject constructor(
 
     fun searchAgain() {
         manuallyDisconnected = false
+        reconnectAttempts = 0
+        reconnectGeneration++
         discoveryUntilMs = SystemClock.elapsedRealtime() + DISCOVERY_WINDOW_MS
         _state.value = _state.value.copy(status = "Searching for paired device…")
         updateTransport()
@@ -196,6 +204,7 @@ class DeviceConnectManager @Inject constructor(
 
     fun disconnect() {
         manuallyDisconnected = true
+        reconnectGeneration++
         resetConnection(closeEndpoint = true)
         _state.value = _state.value.copy(status = "Disconnected by you")
         updateTransport()
@@ -403,6 +412,11 @@ class DeviceConnectManager @Inject constructor(
             "PAUSE" -> target.pause()
             "NEXT" -> if (target.hasNextMediaItem()) target.seekToNextMediaItem()
             "PREVIOUS" -> target.seekToPreviousMediaItem()
+            "SEEK_QUEUE" -> {
+                val index = packet.argument.toInt()
+                if (packet.argument != index.toLong() || index !in 0 until target.mediaItemCount) return
+                target.seekTo(index, 0L)
+            }
             "SEEK" -> target.seekTo(packet.argument.coerceIn(0, target.duration.takeIf { it > 0 } ?: Long.MAX_VALUE))
             "SHUFFLE" -> target.shuffleModeEnabled = !target.shuffleModeEnabled
             "REPEAT" -> target.repeatMode = (target.repeatMode + 1) % 3
@@ -415,6 +429,8 @@ class DeviceConnectManager @Inject constructor(
     private fun finishAuthentication() {
         if (authenticated) return
         authenticated = true
+        reconnectAttempts = 0
+        reconnectGeneration++
         pairingMode = false
         pendingSecret = null
         sentPairingSecret = false
@@ -469,6 +485,7 @@ class DeviceConnectManager @Inject constructor(
                     repeatMode = target.repeatMode,
                     queueIndex = currentIndex,
                     queueSize = target.mediaItemCount,
+                    queueStartIndex = start,
                     queue = queue,
                 ),
             ),
@@ -510,6 +527,24 @@ class DeviceConnectManager @Inject constructor(
         }
     }
 
+    private fun scheduleReconnect() {
+        if (!foreground || manuallyDisconnected || trustedPeer == null || endpointId != null) return
+        if (reconnectAttempts >= 4) {
+            _state.value = _state.value.copy(status = "Connection lost. Tap Search again to retry.")
+            return
+        }
+        val attempt = ++reconnectAttempts
+        val generation = ++reconnectGeneration
+        val delayMs = (1_000L shl (attempt - 1)).coerceAtMost(8_000L)
+        handler.postDelayed({
+            if (generation != reconnectGeneration || !foreground || manuallyDisconnected ||
+                connected || endpointId != null
+            ) return@postDelayed
+            discoveryUntilMs = SystemClock.elapsedRealtime() + DISCOVERY_WINDOW_MS
+            updateTransport()
+        }, delayMs)
+    }
+
     private fun hasPermissions(): Boolean =
         requiredPermissions().all {
             ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
@@ -532,6 +567,7 @@ class DeviceConnectManager @Inject constructor(
         _state.value = _state.value.copy(
             connected = false, peerName = null, remotePlayback = null, pairingRequest = null,
         )
+        scheduleReconnect()
     }
 
     private fun constantTimeEquals(a: String, b: String): Boolean =

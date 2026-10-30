@@ -189,6 +189,7 @@ import com.metrolist.music.ui.component.rememberBottomSheetState
 import com.metrolist.music.ui.component.shimmer.ShimmerTheme
 import com.metrolist.music.ui.menu.YouTubeSongMenu
 import com.metrolist.music.ui.player.BottomSheetPlayer
+import com.metrolist.music.ui.player.RemoteBottomSheetPlayer
 import com.metrolist.music.ui.screens.Screens
 import com.metrolist.music.ui.screens.navigationBuilder
 import com.metrolist.music.ui.screens.settings.ChangelogScreen
@@ -852,6 +853,14 @@ class MainActivity : FragmentActivity() {
                         ?: remember { mutableStateOf(false) }
                 val playerReady by playerReadyState
                 val activePlayerConnection = if (playerReady) playerConnection else null
+                val deviceConnectUi by deviceConnectManager.state.collectAsStateWithLifecycle()
+                val localIsPlaying by (
+                    activePlayerConnection?.isPlaying?.collectAsStateWithLifecycle()
+                        ?: remember { mutableStateOf(false) }
+                )
+                val remotePlayback = deviceConnectUi.remotePlayback
+                val showRemotePlayer =
+                    deviceConnectUi.connected && remotePlayback?.track != null && !localIsPlaying
 
                 val playerAwareWindowInsets =
                     remember(
@@ -916,7 +925,11 @@ class MainActivity : FragmentActivity() {
                     }
                 }
 
-                LaunchedEffect(activePlayerConnection) {
+                LaunchedEffect(activePlayerConnection, showRemotePlayer) {
+                    if (showRemotePlayer) {
+                        if (playerBottomSheetState.isDismissed) playerBottomSheetState.collapseSoft()
+                        return@LaunchedEffect
+                    }
                     val player = runCatching { activePlayerConnection?.player }.getOrNull()
                     if (player?.currentMediaItem == null) {
                         if (!playerBottomSheetState.isDismissed) {
@@ -1178,7 +1191,13 @@ class MainActivity : FragmentActivity() {
 
                             if (!showRail && currentRoute != "wrapped") {
                                 Box {
-                                    if (activePlayerConnection != null) {
+                                    if (showRemotePlayer) {
+                                        RemoteBottomSheetPlayer(
+                                            state = playerBottomSheetState,
+                                            manager = deviceConnectManager,
+                                            peerName = deviceConnectUi.peerName.orEmpty(),
+                                        )
+                                    } else if (activePlayerConnection != null) {
                                         BottomSheetPlayer(
                                             state = playerBottomSheetState,
                                             navController = navController,
@@ -1239,7 +1258,13 @@ class MainActivity : FragmentActivity() {
                                 }
                             } else {
                                 if (currentRoute != "wrapped") {
-                                    if (activePlayerConnection != null) {
+                                    if (showRemotePlayer) {
+                                        RemoteBottomSheetPlayer(
+                                            state = playerBottomSheetState,
+                                            manager = deviceConnectManager,
+                                            peerName = deviceConnectUi.peerName.orEmpty(),
+                                        )
+                                    } else if (activePlayerConnection != null) {
                                         BottomSheetPlayer(
                                             state = playerBottomSheetState,
                                             navController = navController,

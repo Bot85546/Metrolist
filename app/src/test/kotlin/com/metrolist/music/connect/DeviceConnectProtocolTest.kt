@@ -16,8 +16,9 @@ class DeviceConnectProtocolTest {
             updatedAtMs = 100,
             shuffle = true,
             repeatMode = 2,
-            queueIndex = 0,
-            queueSize = 2,
+            queueIndex = 8,
+            queueSize = 24,
+            queueStartIndex = 7,
             queue = listOf(DeviceTrack("id1", "Song", "Artist"), DeviceTrack("id2", "Next", "Artist")),
         )
         val packet = DeviceConnectPacket(type = "STATE", state = snapshot)

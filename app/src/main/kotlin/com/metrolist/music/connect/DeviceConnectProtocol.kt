@@ -23,6 +23,7 @@ data class DevicePlaybackState(
     val repeatMode: Int = 0,
     val queueIndex: Int = -1,
     val queueSize: Int = 0,
+    val queueStartIndex: Int = 0,
     val queue: List<DeviceTrack> = emptyList(),
 )
 
