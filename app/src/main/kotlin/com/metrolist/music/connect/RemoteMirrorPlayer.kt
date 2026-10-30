@@ -72,10 +72,16 @@ class RemoteMirrorPlayer(
 
     fun notifyStateChanged(previous: DevicePlaybackState?, current: DevicePlaybackState?) {
         cachedState = null
-        val flags = Player.Events(FlagSet.Builder()
-            .add(Player.EVENT_MEDIA_ITEM_TRANSITION)
-            .add(Player.EVENT_MEDIA_METADATA_CHANGED)
-            .add(Player.EVENT_TIMELINE_CHANGED)
+        // A full playlist may contain hundreds of songs. Do not rebuild every queue window
+        // on every pause, timer, like or position update when its contents are unchanged.
+        val queueChanged = previous?.queue !== current?.queue ||
+            previous?.queueStartIndex != current?.queueStartIndex ||
+            (previous?.track == null) != (current?.track == null)
+        val itemChanged = previous?.track != current?.track || previous?.queueIndex != current?.queueIndex
+        val flagsBuilder = FlagSet.Builder()
+            .apply { if (itemChanged) add(Player.EVENT_MEDIA_ITEM_TRANSITION) }
+            .apply { if (itemChanged) add(Player.EVENT_MEDIA_METADATA_CHANGED) }
+            .apply { if (queueChanged) add(Player.EVENT_TIMELINE_CHANGED) }
             .add(Player.EVENT_IS_PLAYING_CHANGED)
             .add(Player.EVENT_PLAY_WHEN_READY_CHANGED)
             .add(Player.EVENT_PLAYBACK_STATE_CHANGED)
@@ -84,13 +90,13 @@ class RemoteMirrorPlayer(
             .add(Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)
             .add(Player.EVENT_AVAILABLE_COMMANDS_CHANGED)
             .add(Player.EVENT_PLAYBACK_PARAMETERS_CHANGED)
-            .build())
+        val flags = Player.Events(flagsBuilder.build())
         observers.toList().forEach { listener ->
-            listener.onTimelineChanged(currentTimeline, Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED)
-            if (previous?.track != current?.track) {
+            if (queueChanged) listener.onTimelineChanged(currentTimeline, Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED)
+            if (itemChanged) {
                 listener.onMediaItemTransition(currentMediaItem, Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
             }
-            listener.onMediaMetadataChanged(mediaMetadata)
+            if (itemChanged) listener.onMediaMetadataChanged(mediaMetadata)
             listener.onPlaybackStateChanged(playbackState)
             listener.onPlayWhenReadyChanged(playWhenReady, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
             listener.onIsPlayingChanged(isPlaying)
