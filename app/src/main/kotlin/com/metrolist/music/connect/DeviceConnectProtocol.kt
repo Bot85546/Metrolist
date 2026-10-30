@@ -25,6 +25,7 @@ data class DevicePlaybackState(
     val queueSize: Int = 0,
     val queueStartIndex: Int = 0,
     val queue: List<DeviceTrack> = emptyList(),
+    val queueTitle: String? = null,
 )
 
 @Serializable

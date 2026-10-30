@@ -9,6 +9,7 @@ import android.os.Looper
 import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import com.metrolist.music.playback.queues.Queue
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -83,6 +84,8 @@ class DeviceConnectManager @Inject constructor(
         private set
     var onRemoteLibraryCommand: ((String) -> Unit)? = null
     var onRemoteQueue: ((String?, List<DeviceTrack>, Int) -> Unit)? = null
+    var onRemoteQueueAdd: ((Boolean, List<DeviceTrack>) -> Unit)? = null
+    var queueTitleProvider: (() -> String?)? = null
 
     private data class IncomingQueue(
         val id: String,
@@ -269,18 +272,31 @@ class DeviceConnectManager @Inject constructor(
         source.chunked(12).forEachIndexed { chunk, items ->
             send(DeviceConnectPacket(
                 type = "QUEUE_BATCH", transferId = transferId, queueStart = chunk * 12,
-                queueItems = items.map { item ->
-                    DeviceTrack(
-                        item.mediaId,
-                        item.mediaMetadata.title?.toString().orEmpty(),
-                        item.mediaMetadata.artist?.toString().orEmpty(),
-                        item.mediaMetadata.artworkUri?.toString(),
-                    )
-                },
+                queueItems = items.map(::asDeviceTrack),
             ))
         }
         send(DeviceConnectPacket(type = "QUEUE_END", transferId = transferId))
     }
+
+    fun submitRemoteQueueAddition(items: List<MediaItem>, playNext: Boolean) {
+        if (!isRemoteActive) return
+        val batches = items.take(1500).chunked(12)
+        val orderedBatches = if (playNext) batches.reversed() else batches
+        orderedBatches.forEach { batch ->
+            send(DeviceConnectPacket(
+                type = "QUEUE_ADD",
+                action = if (playNext) "NEXT" else "END",
+                queueItems = batch.map(::asDeviceTrack),
+            ))
+        }
+    }
+
+    private fun asDeviceTrack(item: MediaItem): DeviceTrack = DeviceTrack(
+        item.mediaId,
+        item.mediaMetadata.title?.toString().orEmpty(),
+        item.mediaMetadata.artist?.toString().orEmpty(),
+        item.mediaMetadata.artworkUri?.toString(),
+    )
 
     override fun discovered(endpointId: String, endpointName: String) {
         if (this.endpointId != null || manuallyDisconnected || !foreground) return
@@ -469,6 +485,12 @@ class DeviceConnectManager @Inject constructor(
                 pending.completed = true
                 commitIncomingQueueIfReady(pending)
             }
+            "QUEUE_ADD" -> {
+                if (!authenticated || packet.action !in listOf("NEXT", "END") ||
+                    packet.queueItems.isEmpty() || packet.queueItems.size > 12
+                ) return
+                onRemoteQueueAdd?.invoke(packet.action == "NEXT", packet.queueItems)
+            }
             "DISCONNECT" -> {
                 resetConnection(closeEndpoint = true)
                 _state.value = _state.value.copy(status = "Other device disconnected")
@@ -593,6 +615,7 @@ class DeviceConnectManager @Inject constructor(
                     queueSize = target.mediaItemCount,
                     queueStartIndex = start,
                     queue = queue,
+                    queueTitle = queueTitleProvider?.invoke()?.take(160),
                 ),
             ),
         )

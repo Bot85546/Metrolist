@@ -243,6 +243,7 @@ class PlayerConnection(
                     repeatMode.value = snapshot.repeatMode
                     shuffleModeEnabled.value = snapshot.shuffle
                     currentMediaItemIndex.value = mirror!!.currentMediaItemIndex
+                    queueTitle.value = snapshot.queueTitle
                     canSkipPrevious.value = snapshot.queueIndex > 0
                     canSkipNext.value = snapshot.queueIndex < snapshot.queueSize - 1
                 }
@@ -264,7 +265,9 @@ class PlayerConnection(
         playbackState.value = newPlayer.playbackState
         playWhenReady.value = newPlayer.playWhenReady
         mediaMetadata.value = newPlayer.currentMetadata
-        queueTitle.value = service.queueTitle
+        queueTitle.value = if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.state.value.remotePlayback?.queueTitle
+        } else service.queueTitle
         queueWindows.value = newPlayer.getQueueWindows()
         currentWindowIndex.value = newPlayer.getCurrentQueueIndex()
         currentMediaItemIndex.value = newPlayer.currentMediaItemIndex
@@ -330,6 +333,10 @@ class PlayerConnection(
     fun playNext(item: MediaItem) = playNext(listOf(item))
 
     fun playNext(items: List<MediaItem>) {
+        if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.submitRemoteQueueAddition(items, playNext = true)
+            return
+        }
         // Block if Listen Together guest (unless internal sync)
         if (!allowInternalSync && shouldBlockPlaybackChanges?.invoke() == true) {
             Timber.tag("PlayerConnection").d("playNext blocked - Listen Together guest")
@@ -346,6 +353,10 @@ class PlayerConnection(
     fun addToQueue(item: MediaItem) = addToQueue(listOf(item))
 
     fun addToQueue(items: List<MediaItem>) {
+        if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.submitRemoteQueueAddition(items, playNext = false)
+            return
+        }
         // Block if Listen Together guest (unless internal sync)
         if (!allowInternalSync && shouldBlockPlaybackChanges?.invoke() == true) {
             Timber.tag("PlayerConnection").d("addToQueue blocked - Listen Together guest")
@@ -683,7 +694,9 @@ class PlayerConnection(
         reason: Int,
     ) {
         queueWindows.value = player.getQueueWindows()
-        queueTitle.value = service.queueTitle
+        queueTitle.value = if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.state.value.remotePlayback?.queueTitle
+        } else service.queueTitle
         currentMediaItemIndex.value = player.currentMediaItemIndex
         currentWindowIndex.value = player.getCurrentQueueIndex()
         updateCanSkipPreviousAndNext()

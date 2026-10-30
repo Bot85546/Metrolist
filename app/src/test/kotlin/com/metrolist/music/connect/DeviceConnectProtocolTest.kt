@@ -20,6 +20,7 @@ class DeviceConnectProtocolTest {
             queueSize = 24,
             queueStartIndex = 7,
             queue = listOf(DeviceTrack("id1", "Song", "Artist"), DeviceTrack("id2", "Next", "Artist")),
+            queueTitle = "Liked",
         )
         val packet = DeviceConnectPacket(type = "STATE", state = snapshot)
         assertEquals(packet, DeviceConnectProtocol.decode(DeviceConnectProtocol.encode(packet)))

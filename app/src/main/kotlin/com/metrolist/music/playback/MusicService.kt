@@ -611,6 +611,7 @@ class MusicService :
 
         playerInitialized.value = true
         deviceConnectManager.attachPlayer(player)
+        deviceConnectManager.queueTitleProvider = { queueTitle }
         Timber.tag(TAG).d("Player successfully initialized")
 
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -644,6 +645,12 @@ class MusicService :
         deviceConnectManager.onRemoteQueue = { title, tracks, startIndex ->
             if (!deviceConnectManager.isRemoteActive && tracks.isNotEmpty()) {
                 playQueue(ListQueue(title = title, items = tracks.map { it.asMediaItem(0L) }, startIndex = startIndex))
+            }
+        }
+        deviceConnectManager.onRemoteQueueAdd = { next, tracks ->
+            if (!deviceConnectManager.isRemoteActive && tracks.isNotEmpty()) {
+                val items = tracks.map { it.asMediaItem(0L) }
+                if (next) playNext(items) else addToQueue(items)
             }
         }
         scope.launch {
@@ -3832,6 +3839,8 @@ class MusicService :
     override fun onDestroy() {
         deviceConnectManager.onRemoteLibraryCommand = null
         deviceConnectManager.onRemoteQueue = null
+        deviceConnectManager.onRemoteQueueAdd = null
+        deviceConnectManager.queueTitleProvider = null
         isRunning = false
 
         if (!::player.isInitialized) {
