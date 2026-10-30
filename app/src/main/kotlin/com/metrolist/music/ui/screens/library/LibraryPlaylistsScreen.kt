@@ -462,6 +462,7 @@ fun LibraryPlaylistsScreen(
                             PlaylistListItem(
                                 playlist = item.playlist,
                                 autoPlaylist = true,
+                                badges = {},
                                 modifier =
                                     Modifier
                                         .fillMaxWidth()
@@ -531,6 +532,7 @@ fun LibraryPlaylistsScreen(
                                 playlist = item.playlist,
                                 fillMaxWidth = true,
                                 autoPlaylist = true,
+                                badges = {},
                                 modifier =
                                     Modifier
                                         .fillMaxWidth()

@@ -925,27 +925,24 @@ fun PlaylistListItem(
     },
     badges = badges,
     thumbnailContent = {
-        PlaylistThumbnail(
-            thumbnails = playlist.thumbnails,
-            size = ListThumbnailSize,
-            placeHolder = {
-                val painter = when (playlist.playlist.name) {
-                    stringResource(R.string.liked) -> R.drawable.favorite_border
-                    stringResource(R.string.offline) -> R.drawable.offline
-                    stringResource(R.string.cached_playlist) -> R.drawable.cached
-                    // R.drawable.backup as placeholder
-                    stringResource(R.string.uploaded_playlist) -> R.drawable.backup
-                    else -> if (autoPlaylist) R.drawable.trending_up else R.drawable.queue_music
-                }
-                Icon(
-                    painter = painterResource(painter),
-                    contentDescription = null,
-                    tint = LocalContentColor.current.copy(alpha = 0.8f),
-                    modifier = Modifier.size(ListThumbnailSize / 2)
-                )
-            },
-            shape = RoundedCornerShape(ThumbnailCornerRadius)
-        )
+        val category = LibraryCategory.fromVirtualPlaylistId(playlist.id)
+        if (category != null) {
+            LibraryCategoryThumbnail(category, size = ListThumbnailSize)
+        } else {
+            PlaylistThumbnail(
+                thumbnails = playlist.thumbnails,
+                size = ListThumbnailSize,
+                placeHolder = {
+                    Icon(
+                        painter = painterResource(if (autoPlaylist) R.drawable.trending_up else R.drawable.queue_music),
+                        contentDescription = null,
+                        tint = LocalContentColor.current.copy(alpha = 0.8f),
+                        modifier = Modifier.size(ListThumbnailSize / 2),
+                    )
+                },
+                shape = RoundedCornerShape(ThumbnailCornerRadius),
+            )
+        }
     },
     trailingContent = trailingContent,
     modifier = modifier
@@ -1015,32 +1012,29 @@ fun PlaylistGridItem(
     badges = badges,
     thumbnailContent = {
         val width = maxWidth
-        PlaylistThumbnail(
-            thumbnails = playlist.thumbnails,
-            size = width,
-            placeHolder = {
-                val painter = when (playlist.playlist.name) {
-                    stringResource(R.string.liked) -> R.drawable.favorite_border
-                    stringResource(R.string.offline) -> R.drawable.offline
-                    stringResource(R.string.cached_playlist) -> R.drawable.cached
-                    // R.drawable.backup as placeholder
-                    stringResource(R.string.uploaded_playlist) -> R.drawable.backup
-                    else -> if (autoPlaylist) R.drawable.trending_up else R.drawable.queue_music
-                }
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    Icon(
-                        painter = painterResource(painter),
-                        contentDescription = null,
-                        tint = LocalContentColor.current.copy(alpha = 0.8f),
-                        modifier = Modifier.size(width / 2)
-                    )
-                }
-            },
-            shape = RoundedCornerShape(ThumbnailCornerRadius)
-        )
+        val category = LibraryCategory.fromVirtualPlaylistId(playlist.id)
+        if (category != null) {
+            LibraryCategoryThumbnail(category, size = width)
+        } else {
+            PlaylistThumbnail(
+                thumbnails = playlist.thumbnails,
+                size = width,
+                placeHolder = {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        Icon(
+                            painter = painterResource(if (autoPlaylist) R.drawable.trending_up else R.drawable.queue_music),
+                            contentDescription = null,
+                            tint = LocalContentColor.current.copy(alpha = 0.8f),
+                            modifier = Modifier.size(width / 2),
+                        )
+                    }
+                },
+                shape = RoundedCornerShape(ThumbnailCornerRadius),
+            )
+        }
     },
     fillMaxWidth = fillMaxWidth,
     modifier = modifier

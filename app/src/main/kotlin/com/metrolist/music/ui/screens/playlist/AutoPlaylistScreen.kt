@@ -89,7 +89,6 @@ import timber.log.Timber
 import androidx.media3.exoplayer.offline.Download
 import androidx.media3.exoplayer.offline.DownloadService
 import androidx.navigation.NavController
-import coil3.compose.AsyncImage
 import com.metrolist.innertube.YouTube
 import com.metrolist.music.LocalDownloadUtil
 import com.metrolist.music.LocalPlayerAwareWindowInsets
@@ -110,6 +109,8 @@ import com.metrolist.music.ui.component.DraggableScrollbar
 import com.metrolist.music.ui.component.EmptyPlaceholder
 import com.metrolist.music.ui.component.HideOnScrollFAB
 import com.metrolist.music.ui.component.IconButton
+import com.metrolist.music.ui.component.LibraryCategory
+import com.metrolist.music.ui.component.LibraryCategoryThumbnail
 import com.metrolist.music.ui.component.LocalMenuState
 import com.metrolist.music.ui.component.SongListItem
 import com.metrolist.music.ui.component.SortHeader
@@ -520,6 +521,11 @@ fun AutoPlaylistScreen(
                         item(key = "playlist_header") {
                             AutoPlaylistHeader(
                                 name = playlist,
+                                category = when (playlistType) {
+                                    PlaylistType.LIKE -> LibraryCategory.LIKED
+                                    PlaylistType.UPLOADED -> LibraryCategory.UPLOADED
+                                    else -> LibraryCategory.DOWNLOADED
+                                },
                                 songs = songs!!,
                                 likeLength = likeLength,
                                 downloadState = downloadState,
@@ -836,6 +842,7 @@ fun AutoPlaylistScreen(
 @Composable
 private fun AutoPlaylistHeader(
     name: String,
+    category: LibraryCategory,
     songs: List<Song>,
     likeLength: Int,
     downloadState: Int,
@@ -869,11 +876,10 @@ private fun AutoPlaylistHeader(
                         ),
                 shape = RoundedCornerShape(3.dp),
             ) {
-                AsyncImage(
-                    model = songs[0].song.thumbnailUrl,
-                    contentDescription = null,
-                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
+                LibraryCategoryThumbnail(
+                    category = category,
+                    size = 240.dp,
+                    shape = RoundedCornerShape(3.dp),
                 )
             }
         }
