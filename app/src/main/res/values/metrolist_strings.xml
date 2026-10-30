@@ -1,5 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="device_connect">Device Connect</string>
+    <string name="device_connect_explanation">Control music playing on your other paired Galaxy device. Audio always stays on the playing device.</string>
+    <string name="device_connect_unavailable">This build does not include Google Nearby Connections. Device Connect needs the GMS variant of Metrolitt.</string>
+    <string name="device_connect_permissions">Allow nearby-device permissions</string>
+    <string name="device_connect_pair">Pair another device</string>
+    <string name="device_connect_search">Search again</string>
+    <string name="device_connect_disconnect">Disconnect</string>
+    <string name="device_connect_forget">Forget paired device</string>
+    <string name="device_connect_pair_title">Confirm pairing code</string>
+    <string name="device_connect_pair_description">Check that this code matches on both devices. Only accept if it matches.</string>
+    <string name="device_connect_accept">Codes match</string>
+    <string name="device_connect_reject">Cancel pairing</string>
+    <string name="device_connect_no_remote">No music is currently playing on the connected device.</string>
+    <string name="device_connect_previous">Previous</string>
+    <string name="device_connect_next">Next</string>
+    <string name="device_connect_play">Play</string>
+    <string name="device_connect_pause">Pause</string>
+    <string name="device_connect_shuffle">Shuffle</string>
+    <string name="device_connect_repeat">Repeat</string>
+    <string name="device_connect_queue">Up next</string>
     <string name="local_history">Local</string>
     <string name="remote_history">Remote</string>
 

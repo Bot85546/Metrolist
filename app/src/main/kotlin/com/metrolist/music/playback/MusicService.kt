@@ -260,6 +260,9 @@ class MusicService :
     @Inject
     lateinit var listenTogetherManager: com.metrolist.music.listentogether.ListenTogetherManager
 
+    @Inject
+    lateinit var deviceConnectManager: com.metrolist.music.connect.DeviceConnectManager
+
     private lateinit var audioManager: AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
     private var lastAudioFocusState = AudioManager.AUDIOFOCUS_NONE
@@ -606,6 +609,7 @@ class MusicService :
         player.addListener(sleepTimer!!)
 
         playerInitialized.value = true
+        deviceConnectManager.attachPlayer(player)
         Timber.tag(TAG).d("Player successfully initialized")
 
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -3812,6 +3816,8 @@ class MusicService :
             shutdownDeferred.complete(Unit)
             return
         }
+
+        deviceConnectManager.detachPlayer(player)
 
         val currentMetadata = player.currentMediaItem?.metadata
         if (currentMetadata?.isEpisode == true && player.currentPosition > 0) {
