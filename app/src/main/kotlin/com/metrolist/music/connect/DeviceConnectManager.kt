@@ -52,6 +52,7 @@ class DeviceConnectManager @Inject constructor(
     companion object {
         private const val DISCOVERY_WINDOW_MS = 12_000L
         private const val HANDSHAKE_TIMEOUT_MS = 15_000L
+        private const val WARM_DISCONNECT_MS = 120_000L
 
         fun requiredPermissions(): Array<String> = when {
             Build.VERSION.SDK_INT >= 33 -> arrayOf(
@@ -120,6 +121,7 @@ class DeviceConnectManager @Inject constructor(
     // A manual disconnect suspends synchronization but keeps the already-authenticated Nearby
     // channel warm. Reconnecting within the same app process then needs no Bluetooth discovery.
     private var syncEnabled = true
+    private var suspendGeneration = 0L
     private var discoveryUntilMs = 0L
     private var reconnectAttempts = 0
     private var reconnectGeneration = 0L
@@ -322,9 +324,19 @@ class DeviceConnectManager @Inject constructor(
         _state.value = _state.value.copy(connected = false, remotePlayback = null,
             status = "Disconnected (ready to reconnect)")
         remoteMirrorPlayer?.notifyStateChanged(previous, null)
+        // No command or heartbeat traffic while disconnected; release the Nearby radio after
+        // a short grace period rather than keeping an idle link alive indefinitely.
+        val generation = ++suspendGeneration
+        handler.postDelayed({
+            if (generation == suspendGeneration && authenticated && !syncEnabled) {
+                resetConnection(closeEndpoint = true)
+                _state.value = _state.value.copy(status = "Disconnected")
+            }
+        }, WARM_DISCONNECT_MS)
     }
 
     private fun resumeSync() {
+        suspendGeneration++
         manuallyDisconnected = false
         preferences.edit().putBoolean("manually_disconnected", false).apply()
         syncEnabled = true
@@ -800,6 +812,7 @@ class DeviceConnectManager @Inject constructor(
         }
 
     private fun resetConnection(closeEndpoint: Boolean) {
+        suspendGeneration++
         val previous = _state.value.remotePlayback
         val id = endpointId
         if (id != null && closeEndpoint) transport.disconnect(id)
