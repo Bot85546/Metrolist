@@ -2,9 +2,11 @@ package com.metrolist.music.connect
 
 import android.os.SystemClock
 import androidx.media3.common.C
+import androidx.media3.common.DeviceInfo
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.FlagSet
@@ -12,6 +14,7 @@ import com.metrolist.music.extensions.toMediaItem
 import com.metrolist.music.models.MediaMetadata as MetrolittMetadata
 
 /** A read-only view of the other device's playback, with transport commands forwarded to it. */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class RemoteMirrorPlayer(
     localPlayer: Player,
     private val connect: DeviceConnectManager,
@@ -22,6 +25,30 @@ class RemoteMirrorPlayer(
     private var cachedState: DevicePlaybackState? = null
     private var cachedTimeline: Timeline = Timeline.EMPTY
     private val observers = LinkedHashSet<Player.Listener>()
+
+    private val remoteDeviceInfo = DeviceInfo.Builder(DeviceInfo.PLAYBACK_TYPE_REMOTE).build()
+
+    // The inactive local ExoPlayer has no seek/skip commands. The remote session must advertise
+    // its own capabilities or Android's media controls hide the previous/next buttons.
+    private val remoteCommands =
+        super.getAvailableCommands().buildUpon()
+            .add(Player.COMMAND_GET_TIMELINE)
+            .add(Player.COMMAND_GET_CURRENT_MEDIA_ITEM)
+            .add(Player.COMMAND_GET_METADATA)
+            .add(Player.COMMAND_PLAY_PAUSE)
+            .add(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
+            .add(Player.COMMAND_SEEK_TO_MEDIA_ITEM)
+            .add(Player.COMMAND_SEEK_TO_NEXT)
+            .add(Player.COMMAND_SEEK_TO_PREVIOUS)
+            .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+            .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+            .add(Player.COMMAND_SEEK_BACK)
+            .add(Player.COMMAND_SEEK_FORWARD)
+            .add(Player.COMMAND_SET_REPEAT_MODE)
+            .add(Player.COMMAND_SET_SHUFFLE_MODE)
+            .add(Player.COMMAND_SET_SPEED_AND_PITCH)
+            .add(Player.COMMAND_CHANGE_MEDIA_ITEMS)
+            .build()
 
     private fun timeline(): Timeline {
         val snapshot = remote
@@ -58,6 +85,10 @@ class RemoteMirrorPlayer(
             .add(Player.EVENT_POSITION_DISCONTINUITY)
             .add(Player.EVENT_REPEAT_MODE_CHANGED)
             .add(Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)
+            .add(Player.EVENT_AVAILABLE_COMMANDS_CHANGED)
+            .add(Player.EVENT_DEVICE_INFO_CHANGED)
+            .add(Player.EVENT_PLAYBACK_PARAMETERS_CHANGED)
+            .add(Player.EVENT_VOLUME_CHANGED)
             .build())
         observers.toList().forEach { listener ->
             listener.onTimelineChanged(currentTimeline, Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED)
@@ -70,6 +101,10 @@ class RemoteMirrorPlayer(
             listener.onIsPlayingChanged(isPlaying)
             listener.onShuffleModeEnabledChanged(shuffleModeEnabled)
             listener.onRepeatModeChanged(repeatMode)
+            listener.onPlaybackParametersChanged(playbackParameters)
+            listener.onVolumeChanged(volume)
+            listener.onDeviceInfoChanged(deviceInfo)
+            listener.onAvailableCommandsChanged(availableCommands)
             listener.onEvents(this, flags)
         }
     }
@@ -82,6 +117,28 @@ class RemoteMirrorPlayer(
         val snapshot = remote ?: return 0
         return if (snapshot.queue.isEmpty()) 0
         else (snapshot.queueIndex - snapshot.queueStartIndex).coerceIn(0, (mediaItemCount - 1).coerceAtLeast(0))
+    }
+
+    // One period per remote window. ForwardingPlayer's default reads the *local* player period,
+    // which becomes invalid as soon as the remote playlist advances past index zero. Media3's
+    // MediaSession PlayerWrapper checks this invariant and otherwise throws IllegalStateException.
+    override fun getCurrentPeriodIndex(): Int = currentMediaItemIndex
+
+    override fun getAvailableCommands(): Player.Commands = remoteCommands
+
+    override fun getDeviceInfo(): DeviceInfo = remoteDeviceInfo
+
+    override fun getVolume(): Float = remote?.volume ?: 1f
+
+    override fun setVolume(volume: Float) = connect.sendVolume(volume)
+
+    override fun getPlaybackParameters(): PlaybackParameters = PlaybackParameters(
+        remote?.speed ?: 1f,
+        remote?.pitch ?: 1f,
+    )
+
+    override fun setPlaybackParameters(playbackParameters: PlaybackParameters) {
+        connect.sendPlaybackParameters(playbackParameters.speed, playbackParameters.pitch)
     }
 
     override fun getMediaItemAt(index: Int): MediaItem = timeline().getWindow(index, Timeline.Window()).mediaItem
@@ -97,7 +154,21 @@ class RemoteMirrorPlayer(
 
     override fun getBufferedPosition(): Long = currentPosition
 
+    override fun getContentPosition(): Long = currentPosition
+
+    override fun getContentBufferedPosition(): Long = currentPosition
+
+    override fun getTotalBufferedDuration(): Long = 0L
+
     override fun getDuration(): Long = remote?.durationMs ?: C.TIME_UNSET
+
+    override fun getContentDuration(): Long = duration
+
+    override fun isCurrentMediaItemSeekable(): Boolean = remote?.track != null
+
+    override fun isCurrentMediaItemDynamic(): Boolean = false
+
+    override fun isCurrentMediaItemLive(): Boolean = false
 
     override fun getPlaybackState(): Int = if (remote?.track != null) Player.STATE_READY else Player.STATE_IDLE
 

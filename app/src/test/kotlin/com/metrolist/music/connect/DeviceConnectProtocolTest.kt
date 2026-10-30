@@ -21,6 +21,14 @@ class DeviceConnectProtocolTest {
             queueStartIndex = 7,
             queue = listOf(DeviceTrack("id1", "Song", "Artist"), DeviceTrack("id2", "Next", "Artist")),
             queueTitle = "Liked",
+            speed = 1.25f,
+            pitch = 1.1f,
+            volume = 0.45f,
+            muted = true,
+            sleepTimerRemainingMs = 123_000L,
+            sleepTimerAfterSong = false,
+            sleepTimerStopAfterSong = true,
+            sleepTimerFadeOut = true,
         )
         val packet = DeviceConnectPacket(type = "STATE", state = snapshot)
         assertEquals(packet, DeviceConnectProtocol.decode(DeviceConnectProtocol.encode(packet)))
@@ -53,6 +61,32 @@ class DeviceConnectProtocolTest {
         assertEquals(12_000, DeviceConnectProtocol.projectedPosition(state, 2_100))
         assertEquals(13_000, DeviceConnectProtocol.projectedPosition(state, 20_000))
         assertEquals(10_000, DeviceConnectProtocol.projectedPosition(state.copy(playing = false), 20_000))
+    }
+
+    @Test
+    fun remoteSleepTimerCountdownRequiresNoNetworkPolling() {
+        val state = DevicePlaybackState(
+            revision = 4, sleepTimerRemainingMs = 90_000L, updatedAtMs = 100,
+        )
+        assertEquals(90_000L, DeviceConnectProtocol.projectedSleepTimerRemainingMs(state, 100))
+        assertEquals(30_000L, DeviceConnectProtocol.projectedSleepTimerRemainingMs(state, 60_100))
+        assertEquals(0L, DeviceConnectProtocol.projectedSleepTimerRemainingMs(state, 200_100))
+        assertEquals(-1L, DeviceConnectProtocol.projectedSleepTimerRemainingMs(state.copy(sleepTimerRemainingMs = -1L), 1_000))
+    }
+
+    @Test
+    fun remotePlaybackSettingsCommandsRoundTrip() {
+        listOf(
+            DeviceConnectPacket(type = "COMMAND", action = "SET_PLAYBACK_PARAMETERS", speed = 1.25f,
+                pitch = 1.5f, requestId = "speed-1"),
+            DeviceConnectPacket(type = "COMMAND", action = "SLEEP_TIMER", argument = 45,
+                stopAfterSong = true, fadeOut = true, requestId = "timer-1"),
+            DeviceConnectPacket(type = "COMMAND", action = "SET_VOLUME", volume = 0.6f,
+                requestId = "volume-1"),
+            DeviceConnectPacket(type = "SYNC_MODE", action = "KEEP_SENDER"),
+        ).forEach { command ->
+            assertEquals(command, DeviceConnectProtocol.decode(DeviceConnectProtocol.encode(command)))
+        }
     }
 
     @Test

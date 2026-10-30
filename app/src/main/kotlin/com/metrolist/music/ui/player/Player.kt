@@ -142,6 +142,8 @@ import com.metrolist.music.LocalDatabase
 import com.metrolist.music.LocalDownloadUtil
 import com.metrolist.music.LocalListenTogetherManager
 import com.metrolist.music.LocalPlayerConnection
+import com.metrolist.music.LocalDeviceConnectManager
+import com.metrolist.music.connect.DeviceConnectProtocol
 import com.metrolist.music.R
 import com.metrolist.music.constants.CropAlbumArtKey
 import com.metrolist.music.constants.DarkModeKey
@@ -591,23 +593,29 @@ fun BottomSheetPlayer(
         .getDownload(mediaMetadata?.id ?: "")
         .collectAsStateWithLifecycle(initialValue = null)
 
-    val sleepTimerEnabled =
-        remember(
-            playerConnection.service.sleepTimer?.triggerTime,
-            playerConnection.service.sleepTimer?.pauseWhenSongEnd,
-        ) {
-            playerConnection.service.sleepTimer?.isActive ?: false
-        }
+    val connectManager = LocalDeviceConnectManager.current
+    val connectState by connectManager?.state?.collectAsStateWithLifecycle()
+        ?: remember { mutableStateOf(com.metrolist.music.connect.DeviceConnectUiState()) }
+    val remoteTimerState = connectState.remotePlayback.takeIf { connectManager?.isRemoteActive == true }
+    val sleepTimerEnabled = if (remoteTimerState != null) {
+        remoteTimerState.sleepTimerAfterSong || remoteTimerState.sleepTimerRemainingMs >= 0L
+    } else {
+        playerConnection.service.sleepTimer?.isActive ?: false
+    }
 
     var sleepTimerTimeLeft by remember {
         mutableLongStateOf(0L)
     }
 
-    LaunchedEffect(sleepTimerEnabled) {
+    LaunchedEffect(sleepTimerEnabled, remoteTimerState?.revision) {
         if (sleepTimerEnabled) {
             while (isActive) {
                 sleepTimerTimeLeft =
-                    if (playerConnection.service.sleepTimer?.pauseWhenSongEnd == true) {
+                    if (remoteTimerState != null && remoteTimerState.sleepTimerAfterSong) {
+                        playerConnection.player.duration - playerConnection.player.currentPosition
+                    } else if (remoteTimerState != null) {
+                        DeviceConnectProtocol.projectedSleepTimerRemainingMs(remoteTimerState, android.os.SystemClock.elapsedRealtime())
+                    } else if (playerConnection.service.sleepTimer?.pauseWhenSongEnd == true) {
                         playerConnection.player.duration - playerConnection.player.currentPosition
                     } else {
                         (playerConnection.service.sleepTimer?.triggerTime ?: 0L) - System.currentTimeMillis()
@@ -647,11 +655,8 @@ fun BottomSheetPlayer(
                 TextButton(
                     onClick = {
                         showSleepTimerDialog = false
-                        playerConnection.service.sleepTimer?.start(
-                            minute = sleepTimerValue.roundToInt(),
-                            stopAfterCurrentSong = sleepTimerStopAfterCurrentSong,
-                            fadeOut = sleepTimerFadeOut,
-                        )
+                        playerConnection.startSleepTimer(sleepTimerValue.roundToInt(),
+                            sleepTimerStopAfterCurrentSong, sleepTimerFadeOut)
                     },
                 ) {
                     Text(stringResource(android.R.string.ok))
@@ -666,6 +671,18 @@ fun BottomSheetPlayer(
             },
             text = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (sleepTimerEnabled) {
+                        Text(
+                            text = if ((remoteTimerState?.sleepTimerAfterSong == true) ||
+                                (remoteTimerState == null && playerConnection.service.sleepTimer?.pauseWhenSongEnd == true)
+                            ) stringResource(R.string.device_connect_sleep_timer_end_of_song)
+                            else stringResource(R.string.device_connect_sleep_timer_remaining,
+                                (sleepTimerTimeLeft.coerceAtLeast(0L) + 59_999L) / 60_000L),
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
                     Text(
                         text =
                             pluralStringResource(
@@ -730,10 +747,18 @@ fun BottomSheetPlayer(
                         OutlinedIconButton(
                             onClick = {
                                 showSleepTimerDialog = false
-                                playerConnection.service.sleepTimer?.start(minute = -1)
+                                playerConnection.startSleepTimer(-1, false, sleepTimerFadeOut)
                             },
                         ) {
                             Text(stringResource(R.string.end_of_song))
+                        }
+                        if (sleepTimerEnabled) {
+                            TextButton(onClick = {
+                                showSleepTimerDialog = false
+                                playerConnection.startSleepTimer(0)
+                            }) {
+                                Text(stringResource(R.string.device_connect_cancel_sleep_timer))
+                            }
                         }
                     }
                 }

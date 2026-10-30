@@ -38,6 +38,13 @@ data class DeviceConnectUiState(
     val remotePlayback: DevicePlaybackState? = null,
 )
 
+data class DeviceSleepTimerSnapshot(
+    val remainingMs: Long = -1L,
+    val afterSong: Boolean = false,
+    val stopAfterSong: Boolean = false,
+    val fadeOut: Boolean = false,
+)
+
 @Singleton
 class DeviceConnectManager @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -86,6 +93,12 @@ class DeviceConnectManager @Inject constructor(
     var onRemoteQueue: ((String?, List<DeviceTrack>, Int) -> Unit)? = null
     var onRemoteQueueAdd: ((Boolean, List<DeviceTrack>) -> Unit)? = null
     var queueTitleProvider: (() -> String?)? = null
+    var sleepTimerProvider: (() -> DeviceSleepTimerSnapshot)? = null
+    var volumeProvider: (() -> Float)? = null
+    var mutedProvider: (() -> Boolean)? = null
+    var onRemoteSleepTimerCommand: ((Int, Boolean, Boolean) -> Unit)? = null
+    var onRemoteVolumeCommand: ((Float) -> Unit)? = null
+    var onRemoteMuteCommand: (() -> Unit)? = null
 
     private data class IncomingQueue(
         val id: String,
@@ -99,11 +112,14 @@ class DeviceConnectManager @Inject constructor(
     private var incomingQueue: IncomingQueue? = null
 
     val isRemoteActive: Boolean
-        get() = authenticated && _state.value.remotePlayback?.track != null &&
+        get() = authenticated && syncEnabled && _state.value.remotePlayback?.track != null &&
             player?.isPlaying != true && player?.playWhenReady != true
     private var foreground = false
     private var pairingMode = false
     private var manuallyDisconnected = preferences.getBoolean("manually_disconnected", false)
+    // A manual disconnect suspends synchronization but keeps the already-authenticated Nearby
+    // channel warm. Reconnecting within the same app process then needs no Bluetooth discovery.
+    private var syncEnabled = true
     private var discoveryUntilMs = 0L
     private var reconnectAttempts = 0
     private var reconnectGeneration = 0L
@@ -137,6 +153,8 @@ class DeviceConnectManager @Inject constructor(
                     Player.EVENT_REPEAT_MODE_CHANGED,
                     Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED,
                     Player.EVENT_PLAYBACK_STATE_CHANGED,
+                    Player.EVENT_PLAYBACK_PARAMETERS_CHANGED,
+                    Player.EVENT_VOLUME_CHANGED,
                 )
             ) {
                 revision++
@@ -207,6 +225,10 @@ class DeviceConnectManager @Inject constructor(
     }
 
     fun searchAgain() {
+        if (authenticated) {
+            resumeSync()
+            return
+        }
         manuallyDisconnected = false
         preferences.edit().putBoolean("manually_disconnected", false).apply()
         reconnectAttempts = 0
@@ -235,6 +257,11 @@ class DeviceConnectManager @Inject constructor(
         manuallyDisconnected = true
         preferences.edit().putBoolean("manually_disconnected", true).apply()
         reconnectGeneration++
+        if (authenticated) {
+            send(DeviceConnectPacket(type = "SYNC_MODE", action = "OFF"))
+            suspendSync()
+            return
+        }
         resetConnection(closeEndpoint = true)
         _state.value = _state.value.copy(status = "Disconnected by you")
         updateTransport()
@@ -242,13 +269,14 @@ class DeviceConnectManager @Inject constructor(
 
     fun forgetDevice() {
         disconnect()
+        resetConnection(closeEndpoint = true)
         trust.forget()
         trustedPeer = null
         _state.value = _state.value.copy(trustedDeviceName = null, status = "Device forgotten")
     }
 
     fun sendCommand(action: String, argument: Long = 0L) {
-        if (!authenticated || _state.value.remotePlayback == null) return
+        if (!authenticated || !syncEnabled || _state.value.remotePlayback == null) return
         send(
             DeviceConnectPacket(
                 type = "COMMAND",
@@ -257,6 +285,54 @@ class DeviceConnectManager @Inject constructor(
                 requestId = UUID.randomUUID().toString(),
             ),
         )
+    }
+
+    fun sendPlaybackParameters(speed: Float, pitch: Float) {
+        if (!authenticated || !syncEnabled || !speed.isFinite() || !pitch.isFinite()) return
+        if (speed !in 0.25f..4f || pitch !in 0.25f..4f) return
+        send(DeviceConnectPacket(type = "COMMAND", action = "SET_PLAYBACK_PARAMETERS",
+            speed = speed, pitch = pitch, requestId = UUID.randomUUID().toString()))
+    }
+
+    fun sendSleepTimer(minute: Int, stopAfterSong: Boolean, fadeOut: Boolean) {
+        if (!authenticated || !syncEnabled || minute !in -1..120) return
+        send(DeviceConnectPacket(type = "COMMAND", action = "SLEEP_TIMER",
+            argument = minute.toLong(), stopAfterSong = stopAfterSong, fadeOut = fadeOut,
+            requestId = UUID.randomUUID().toString()))
+    }
+
+    fun sendVolume(volume: Float) {
+        if (!authenticated || !syncEnabled || !volume.isFinite()) return
+        send(DeviceConnectPacket(type = "COMMAND", action = "SET_VOLUME",
+            volume = volume.coerceIn(0f, 1f), requestId = UUID.randomUUID().toString()))
+    }
+
+    fun refreshSnapshot() {
+        if (!authenticated || !syncEnabled) return
+        revision++
+        sendSnapshot()
+    }
+
+    private fun suspendSync() {
+        if (!authenticated) return
+        val previous = _state.value.remotePlayback
+        syncEnabled = false
+        incomingQueue = null
+        latestRemoteRevision = -1L
+        _state.value = _state.value.copy(connected = false, remotePlayback = null,
+            status = "Disconnected (ready to reconnect)")
+        remoteMirrorPlayer?.notifyStateChanged(previous, null)
+    }
+
+    private fun resumeSync() {
+        manuallyDisconnected = false
+        preferences.edit().putBoolean("manually_disconnected", false).apply()
+        syncEnabled = true
+        _state.value = _state.value.copy(connected = true, status = "Connected securely")
+        send(DeviceConnectPacket(type = "SYNC_MODE",
+            action = if (player?.isPlaying == true) "KEEP_SENDER" else "KEEP_RECEIVER"))
+        send(DeviceConnectPacket(type = "GET_STATE"))
+        sendSnapshot()
     }
 
     /** Transfers the selected playlist without decoding or streaming any audio on this device. */
@@ -437,9 +513,27 @@ class DeviceConnectManager @Inject constructor(
                     }
                     .onFailure { failed("Could not store secure pairing") }
             }
-            "GET_STATE" -> if (authenticated) sendSnapshot()
-            "STATE" -> {
+            "SYNC_MODE" -> {
                 if (!authenticated) return
+                when (packet.action) {
+                    "OFF" -> {
+                        manuallyDisconnected = true
+                        preferences.edit().putBoolean("manually_disconnected", true).apply()
+                        suspendSync()
+                    }
+                    "KEEP_SENDER", "KEEP_RECEIVER" -> {
+                        manuallyDisconnected = false
+                        preferences.edit().putBoolean("manually_disconnected", false).apply()
+                        syncEnabled = true
+                        _state.value = _state.value.copy(connected = true, status = "Connected securely")
+                        if (packet.action == "KEEP_SENDER" && player?.isPlaying == true) player?.pause()
+                        sendSnapshot()
+                    }
+                }
+            }
+            "GET_STATE" -> if (authenticated && syncEnabled) sendSnapshot()
+            "STATE" -> {
+                if (!authenticated || !syncEnabled) return
                 val snapshot = packet.state ?: return
                 if (snapshot.revision < latestRemoteRevision) return
                 latestRemoteRevision = snapshot.revision
@@ -450,11 +544,11 @@ class DeviceConnectManager @Inject constructor(
                 remoteMirrorPlayer?.notifyStateChanged(oldSnapshot, _state.value.remotePlayback)
             }
             "COMMAND" -> {
-                if (!authenticated || packet.requestId.isBlank()) return
+                if (!authenticated || !syncEnabled || packet.requestId.isBlank()) return
                 applyCommand(packet)
             }
             "QUEUE_BEGIN" -> {
-                if (!authenticated || packet.transferId.length !in 16..64 || packet.queueTotal !in 1..1500 ||
+                if (!authenticated || !syncEnabled || packet.transferId.length !in 16..64 || packet.queueTotal !in 1..1500 ||
                     packet.queueStart !in 0 until packet.queueTotal
                 ) return
                 incomingQueue = IncomingQueue(
@@ -466,7 +560,7 @@ class DeviceConnectManager @Inject constructor(
                 )
             }
             "QUEUE_BATCH" -> {
-                if (!authenticated) return
+                if (!authenticated || !syncEnabled) return
                 val pending = incomingQueue ?: return
                 if (pending.id != packet.transferId ||
                     SystemClock.elapsedRealtime() - pending.receivedAtMs > 30_000L ||
@@ -479,14 +573,14 @@ class DeviceConnectManager @Inject constructor(
                 commitIncomingQueueIfReady(pending)
             }
             "QUEUE_END" -> {
-                if (!authenticated) return
+                if (!authenticated || !syncEnabled) return
                 val pending = incomingQueue ?: return
                 if (pending.id != packet.transferId) return
                 pending.completed = true
                 commitIncomingQueueIfReady(pending)
             }
             "QUEUE_ADD" -> {
-                if (!authenticated || packet.action !in listOf("NEXT", "END") ||
+                if (!authenticated || !syncEnabled || packet.action !in listOf("NEXT", "END") ||
                     packet.queueItems.isEmpty() || packet.queueItems.size > 12
                 ) return
                 onRemoteQueueAdd?.invoke(packet.action == "NEXT", packet.queueItems)
@@ -541,7 +635,23 @@ class DeviceConnectManager @Inject constructor(
             "SHUFFLE" -> target.shuffleModeEnabled = !target.shuffleModeEnabled
             "REPEAT" -> target.repeatMode = (target.repeatMode + 1) % 3
             "SET_REPEAT" -> if (packet.argument in 0L..2L) target.repeatMode = packet.argument.toInt()
-            "TOGGLE_LIKE", "TOGGLE_LIBRARY" -> onRemoteLibraryCommand?.invoke(packet.action)
+            "SET_PLAYBACK_PARAMETERS" -> {
+                if (!packet.speed.isFinite() || !packet.pitch.isFinite() ||
+                    packet.speed !in 0.25f..4f || packet.pitch !in 0.25f..4f) return
+                target.playbackParameters = androidx.media3.common.PlaybackParameters(packet.speed, packet.pitch)
+            }
+            "SET_VOLUME" -> {
+                if (!packet.volume.isFinite() || packet.volume !in 0f..1f) return
+                onRemoteVolumeCommand?.invoke(packet.volume)
+            }
+            "TOGGLE_MUTE" -> onRemoteMuteCommand?.invoke()
+            "SLEEP_TIMER" -> {
+                val minutes = packet.argument.toInt()
+                if (packet.argument != minutes.toLong() || minutes !in -1..120) return
+                onRemoteSleepTimerCommand?.invoke(minutes, packet.stopAfterSong, packet.fadeOut)
+            }
+            "TOGGLE_LIKE", "TOGGLE_LIBRARY", "START_RADIO", "ADD_TO_TARGET_PLAYLIST" ->
+                onRemoteLibraryCommand?.invoke(packet.action)
             else -> return
         }
         revision++
@@ -557,6 +667,7 @@ class DeviceConnectManager @Inject constructor(
     private fun finishAuthentication() {
         if (authenticated) return
         authenticated = true
+        syncEnabled = true
         reconnectAttempts = 0
         reconnectGeneration++
         pairingMode = false
@@ -577,8 +688,9 @@ class DeviceConnectManager @Inject constructor(
     }
 
     private fun sendSnapshot() {
-        if (!authenticated) return
+        if (!authenticated || !syncEnabled) return
         val target = player ?: return
+        val timer = sleepTimerProvider?.invoke() ?: DeviceSleepTimerSnapshot()
         val current = target.currentMediaItem
         val currentIndex = target.currentMediaItemIndex
         val start = (currentIndex - 2).coerceAtLeast(0)
@@ -616,6 +728,14 @@ class DeviceConnectManager @Inject constructor(
                     queueStartIndex = start,
                     queue = queue,
                     queueTitle = queueTitleProvider?.invoke()?.take(160),
+                    speed = target.playbackParameters.speed,
+                    pitch = target.playbackParameters.pitch,
+                    volume = volumeProvider?.invoke()?.coerceIn(0f, 1f) ?: 1f,
+                    muted = mutedProvider?.invoke() == true,
+                    sleepTimerRemainingMs = timer.remainingMs,
+                    sleepTimerAfterSong = timer.afterSong,
+                    sleepTimerStopAfterSong = timer.stopAfterSong,
+                    sleepTimerFadeOut = timer.fadeOut,
                 ),
             ),
         )
@@ -687,6 +807,7 @@ class DeviceConnectManager @Inject constructor(
         peer = null
         connected = false
         authenticated = false
+        syncEnabled = true
         acceptedUntrustedEndpoint = null
         pendingSecret = null
         sentPairingSecret = false

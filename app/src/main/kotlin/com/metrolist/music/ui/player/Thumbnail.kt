@@ -71,6 +71,7 @@ import coil3.compose.AsyncImage
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import com.metrolist.music.LocalListenTogetherManager
+import com.metrolist.music.LocalDeviceConnectManager
 import com.metrolist.music.LocalPlayerConnection
 import com.metrolist.music.R
 import com.metrolist.music.constants.CropAlbumArtKey
@@ -441,6 +442,12 @@ private fun ThumbnailHeader(
     textColor: Color,
     modifier: Modifier = Modifier
 ) {
+    val connectManager = LocalDeviceConnectManager.current
+    val connectState by connectManager?.state?.collectAsStateWithLifecycle()
+        ?: remember { mutableStateOf(com.metrolist.music.connect.DeviceConnectUiState()) }
+    val remoteName = if (connectManager?.isRemoteActive == true) {
+        connectState.peerName ?: connectState.trustedDeviceName
+    } else null
     val listenTogetherManager = LocalListenTogetherManager.current
     val listenTogetherRoleState = listenTogetherManager?.role?.collectAsStateWithLifecycle(initialValue = RoomRole.NONE)
     val isListenTogetherGuest = listenTogetherRoleState?.value == RoomRole.GUEST
@@ -464,7 +471,8 @@ private fun ThumbnailHeader(
                 )
             } else {
                 Text(
-                    text = stringResource(R.string.now_playing),
+                    text = if (remoteName != null) stringResource(R.string.device_connect_playing_on, remoteName)
+                        else stringResource(R.string.now_playing),
                     style = MaterialTheme.typography.titleMedium,
                     color = textColor
                 )

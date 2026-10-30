@@ -26,6 +26,15 @@ data class DevicePlaybackState(
     val queueStartIndex: Int = 0,
     val queue: List<DeviceTrack> = emptyList(),
     val queueTitle: String? = null,
+    val speed: Float = 1f,
+    val pitch: Float = 1f,
+    val volume: Float = 1f,
+    val muted: Boolean = false,
+    // The deadline is projected locally from updatedAtMs, never polled over Nearby.
+    val sleepTimerRemainingMs: Long = -1L,
+    val sleepTimerAfterSong: Boolean = false,
+    val sleepTimerStopAfterSong: Boolean = false,
+    val sleepTimerFadeOut: Boolean = false,
 )
 
 @Serializable
@@ -45,6 +54,11 @@ data class DeviceConnectPacket(
     val queueStart: Int = 0,
     val queueTitle: String = "",
     val queueItems: List<DeviceTrack> = emptyList(),
+    val speed: Float = 1f,
+    val pitch: Float = 1f,
+    val volume: Float = 1f,
+    val stopAfterSong: Boolean = false,
+    val fadeOut: Boolean = false,
 )
 
 object DeviceConnectProtocol {
@@ -78,4 +92,9 @@ object DeviceConnectProtocol {
         val position = (state.positionMs + delta).coerceAtLeast(0)
         return if (state.durationMs > 0) position.coerceAtMost(state.durationMs) else position
     }
+
+    fun projectedSleepTimerRemainingMs(state: DevicePlaybackState, nowElapsedMs: Long): Long =
+        if (state.sleepTimerRemainingMs < 0) -1L else
+            (state.sleepTimerRemainingMs - (nowElapsedMs - state.updatedAtMs).coerceAtLeast(0L))
+                .coerceAtLeast(0L)
 }

@@ -197,7 +197,7 @@ class PlayerConnection(
     val canSkipNext = MutableStateFlow(true)
 
     val error = MutableStateFlow<PlaybackException?>(null)
-    val isMuted = service.isMuted
+    val isMuted = MutableStateFlow(service.isMuted.value)
     val currentStreamClient = service.currentStreamClient
 
     val waitingForNetworkConnection = service.waitingForNetworkConnection
@@ -215,6 +215,11 @@ class PlayerConnection(
     private var attachedPlayer: Player? = null
 
     init {
+        scope.launch {
+            service.isMuted.collect { muted ->
+                if (!deviceConnectManager.isRemoteActive) isMuted.value = muted
+            }
+        }
         scope.launch {
             service.playerFlow.collect { newPlayer ->
                 if (newPlayer != null && !deviceConnectManager.isRemoteActive && newPlayer != attachedPlayer) {
@@ -246,6 +251,9 @@ class PlayerConnection(
                     queueTitle.value = snapshot.queueTitle
                     canSkipPrevious.value = snapshot.queueIndex > 0
                     canSkipNext.value = snapshot.queueIndex < snapshot.queueSize - 1
+                    isMuted.value = snapshot.muted
+                } else {
+                    isMuted.value = service.isMuted.value
                 }
             }
         }
@@ -383,11 +391,31 @@ class PlayerConnection(
     }
 
     fun toggleMute() {
-        service.toggleMute()
+        if (deviceConnectManager.isRemoteActive) deviceConnectManager.sendCommand("TOGGLE_MUTE")
+        else service.toggleMute()
     }
 
     fun setMuted(muted: Boolean) {
-        service.setMuted(muted)
+        if (deviceConnectManager.isRemoteActive) {
+            if (deviceConnectManager.state.value.remotePlayback?.muted != muted) {
+                deviceConnectManager.sendCommand("TOGGLE_MUTE")
+            }
+        } else service.setMuted(muted)
+    }
+
+    fun startSleepTimer(minutes: Int, stopAfterCurrentSong: Boolean = false, fadeOut: Boolean = false) {
+        if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.sendSleepTimer(minutes, stopAfterCurrentSong, fadeOut)
+        } else {
+            if (minutes == 0) service.sleepTimer?.clear()
+            else service.sleepTimer?.start(minutes, stopAfterCurrentSong, fadeOut)
+            deviceConnectManager.refreshSnapshot()
+        }
+    }
+
+    fun setPlayerVolume(volume: Float) {
+        if (deviceConnectManager.isRemoteActive) deviceConnectManager.sendVolume(volume)
+        else service.playerVolume.value = volume
     }
 
     fun toggleLibrary() {

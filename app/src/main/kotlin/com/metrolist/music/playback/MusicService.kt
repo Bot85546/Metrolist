@@ -603,15 +603,31 @@ class MusicService :
         )
         player = createExoPlayer(prefs = startupPrefs!!)
         player.addListener(this@MusicService)
-        sleepTimer =
-            SleepTimer(scope, player) { multiplier ->
-                sleepTimerVolumeMultiplier.value = multiplier
-            }
+        sleepTimer = SleepTimer(
+            scope, player,
+            onVolumeMultiplierChanged = { multiplier -> sleepTimerVolumeMultiplier.value = multiplier },
+            onTimerChanged = { deviceConnectManager.refreshSnapshot() },
+        )
         player.addListener(sleepTimer!!)
 
         playerInitialized.value = true
         deviceConnectManager.attachPlayer(player)
         deviceConnectManager.queueTitleProvider = { queueTitle }
+        deviceConnectManager.sleepTimerProvider = {
+            sleepTimer?.let { timer ->
+                com.metrolist.music.connect.DeviceSleepTimerSnapshot(
+                    remainingMs = timer.triggerTime.takeIf { it >= 0L }
+                        ?.let { (it - System.currentTimeMillis()).coerceAtLeast(0L) } ?: -1L,
+                    afterSong = timer.pauseWhenSongEnd,
+                    stopAfterSong = timer.stopAfterCurrentSongOnTimeout,
+                    fadeOut = timer.fadeOutEnabled,
+                )
+            } ?: com.metrolist.music.connect.DeviceSleepTimerSnapshot()
+        }
+        deviceConnectManager.volumeProvider = {
+            if (::playerVolume.isInitialized) playerVolume.value else 1f
+        }
+        deviceConnectManager.mutedProvider = { isMuted.value }
         Timber.tag(TAG).d("Player successfully initialized")
 
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -619,10 +635,22 @@ class MusicService :
 
         mediaLibrarySessionCallback.apply {
             service = this@MusicService
-            toggleLike = ::toggleLike
-            toggleStartRadio = ::toggleStartRadio
-            toggleLibrary = ::toggleLibrary
-            addToTargetPlaylist = ::addToTargetPlaylist
+            toggleLike = {
+                if (deviceConnectManager.isRemoteActive) deviceConnectManager.sendCommand("TOGGLE_LIKE")
+                else this@MusicService.toggleLike()
+            }
+            toggleStartRadio = {
+                if (deviceConnectManager.isRemoteActive) deviceConnectManager.sendCommand("START_RADIO")
+                else this@MusicService.toggleStartRadio()
+            }
+            toggleLibrary = {
+                if (deviceConnectManager.isRemoteActive) deviceConnectManager.sendCommand("TOGGLE_LIBRARY")
+                else this@MusicService.toggleLibrary()
+            }
+            addToTargetPlaylist = {
+                if (deviceConnectManager.isRemoteActive) deviceConnectManager.sendCommand("ADD_TO_TARGET_PLAYLIST")
+                else this@MusicService.addToTargetPlaylist()
+            }
         }
         mediaSession =
             MediaLibrarySession
@@ -640,7 +668,22 @@ class MusicService :
             when (action) {
                 "TOGGLE_LIKE" -> toggleLike()
                 "TOGGLE_LIBRARY" -> toggleLibrary()
+                "START_RADIO" -> toggleStartRadio()
+                "ADD_TO_TARGET_PLAYLIST" -> addToTargetPlaylist()
             }
+        }
+        deviceConnectManager.onRemoteSleepTimerCommand = { minutes, stopAfterSong, fadeOut ->
+            if (minutes == 0) sleepTimer?.clear()
+            else sleepTimer?.start(minutes, stopAfterSong, fadeOut)
+            deviceConnectManager.refreshSnapshot()
+        }
+        deviceConnectManager.onRemoteVolumeCommand = { volume ->
+            if (::playerVolume.isInitialized) playerVolume.value = volume
+            deviceConnectManager.refreshSnapshot()
+        }
+        deviceConnectManager.onRemoteMuteCommand = {
+            toggleMute()
+            deviceConnectManager.refreshSnapshot()
         }
         deviceConnectManager.onRemoteQueue = { title, tracks, startIndex ->
             if (!deviceConnectManager.isRemoteActive && tracks.isNotEmpty()) {
@@ -692,6 +735,12 @@ class MusicService :
             else com.metrolist.music.constants.AudioQuality.entries.find { it.name == value }
         } ?: com.metrolist.music.constants.AudioQuality.AUTO
         playerVolume = MutableStateFlow((startupPrefs!![PlayerVolumeKey] ?: 1f).coerceIn(0f, 1f))
+        scope.launch {
+            playerVolume.collectLatest {
+                delay(140L) // One small state update after a slider drag burst.
+                deviceConnectManager.refreshSnapshot()
+            }
+        }
 
         initializeCast()
 
@@ -3845,6 +3894,12 @@ class MusicService :
         deviceConnectManager.onRemoteQueue = null
         deviceConnectManager.onRemoteQueueAdd = null
         deviceConnectManager.queueTitleProvider = null
+        deviceConnectManager.sleepTimerProvider = null
+        deviceConnectManager.volumeProvider = null
+        deviceConnectManager.mutedProvider = null
+        deviceConnectManager.onRemoteSleepTimerCommand = null
+        deviceConnectManager.onRemoteVolumeCommand = null
+        deviceConnectManager.onRemoteMuteCommand = null
         isRunning = false
 
         if (!::player.isInitialized) {

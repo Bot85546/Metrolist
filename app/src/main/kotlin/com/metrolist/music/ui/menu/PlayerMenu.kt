@@ -81,6 +81,7 @@ import com.metrolist.music.LocalDatabase
 import com.metrolist.music.LocalDownloadUtil
 import com.metrolist.music.LocalListenTogetherManager
 import com.metrolist.music.LocalPlayerConnection
+import com.metrolist.music.LocalDeviceConnectManager
 import com.metrolist.music.R
 import com.metrolist.music.constants.ListItemHeight
 import com.metrolist.music.constants.VarispeedKey
@@ -118,6 +119,15 @@ fun PlayerMenu(
     val database = LocalDatabase.current
     val playerConnection = LocalPlayerConnection.current ?: return
     val playerVolume = playerConnection.service.playerVolume.collectAsStateWithLifecycle()
+    val deviceConnectManager = LocalDeviceConnectManager.current
+    val deviceConnectState by deviceConnectManager?.state?.collectAsStateWithLifecycle()
+        ?: remember { mutableStateOf(com.metrolist.music.connect.DeviceConnectUiState()) }
+    val isRemoteOutput = deviceConnectManager?.isRemoteActive == true
+    val remoteVolume = deviceConnectState.remotePlayback?.volume ?: 1f
+    var pendingRemoteVolume by remember { mutableFloatStateOf(remoteVolume) }
+    LaunchedEffect(isRemoteOutput, remoteVolume) {
+        if (isRemoteOutput) pendingRemoteVolume = remoteVolume
+    }
 
     // Cast state for volume control - safely access castConnectionHandler to prevent crashes
     val castHandler =
@@ -279,13 +289,22 @@ fun PlayerMenu(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 VolumeSlider(
-                    value = if (isCasting) castVolume else playerVolume.value,
+                    value = when {
+                        isCasting -> castVolume
+                        isRemoteOutput -> pendingRemoteVolume
+                        else -> playerVolume.value
+                    },
                     onValueChange = { volume ->
                         if (isCasting) {
                             castHandler?.setVolume(volume)
+                        } else if (isRemoteOutput) {
+                            pendingRemoteVolume = volume
                         } else {
-                            playerConnection.service.playerVolume.value = volume
+                            playerConnection.setPlayerVolume(volume)
                         }
+                    },
+                    onValueChangeFinished = {
+                        if (isRemoteOutput && !isCasting) playerConnection.setPlayerVolume(pendingRemoteVolume)
                     },
                     modifier = Modifier.weight(1f),
                     accentColor = MaterialTheme.colorScheme.primary,
