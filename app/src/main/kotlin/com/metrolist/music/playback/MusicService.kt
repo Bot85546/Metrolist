@@ -735,11 +735,9 @@ class MusicService :
             else com.metrolist.music.constants.AudioQuality.entries.find { it.name == value }
         } ?: com.metrolist.music.constants.AudioQuality.AUTO
         playerVolume = MutableStateFlow((startupPrefs!![PlayerVolumeKey] ?: 1f).coerceIn(0f, 1f))
-        scope.launch {
-            playerVolume.collectLatest {
-                delay(140L) // One small state update after a slider drag burst.
-                deviceConnectManager.refreshSnapshot()
-            }
+        playerVolume.collectLatest(scope) {
+            delay(140L) // One small state update after a slider drag burst.
+            deviceConnectManager.refreshSnapshot()
         }
 
         initializeCast()
