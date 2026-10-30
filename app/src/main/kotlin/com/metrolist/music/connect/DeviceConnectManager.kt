@@ -633,7 +633,23 @@ class DeviceConnectManager @Inject constructor(
         if (!connected && endpointId != null) {
             resetConnection(closeEndpoint = true)
             updateTransport()
+        } else if (!connected) {
+            schedulePairingDiscoveryRetry()
         }
+    }
+
+    private fun schedulePairingDiscoveryRetry() {
+        if (!pairingMode || !foreground || SystemClock.elapsedRealtime() >= discoveryUntilMs) return
+        val generation = ++reconnectGeneration
+        handler.postDelayed({
+            if (generation == reconnectGeneration && pairingMode && foreground &&
+                endpointId == null && SystemClock.elapsedRealtime() < discoveryUntilMs
+            ) {
+                transport.stopDiscovery()
+                transport.stopAdvertising()
+                updateTransport()
+            }
+        }, 1_500L)
     }
 
     private fun applyCommand(packet: DeviceConnectPacket) {
@@ -868,19 +884,8 @@ class DeviceConnectManager @Inject constructor(
         )
         remoteMirrorPlayer?.notifyStateChanged(previous, null)
         scheduleReconnect()
-        // A failed untrusted attempt should not strand both users in pairing mode.
-        // Nearby may cache the failed endpoint until discovery is restarted.
-        if (pairingMode && foreground && SystemClock.elapsedRealtime() < discoveryUntilMs) {
-            val generation = ++reconnectGeneration
-            handler.postDelayed({
-                if (generation == reconnectGeneration && pairingMode && foreground &&
-                    endpointId == null && SystemClock.elapsedRealtime() < discoveryUntilMs
-                ) {
-                    transport.stopDiscovery()
-                    updateTransport()
-                }
-            }, 1_500L)
-        }
+        // Nearby may cache a failed endpoint; recover while pairing remains active.
+        schedulePairingDiscoveryRetry()
     }
 
     private fun constantTimeEquals(a: String, b: String): Boolean =
