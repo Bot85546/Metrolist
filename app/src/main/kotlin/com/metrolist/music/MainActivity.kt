@@ -336,7 +336,7 @@ class MainActivity : FragmentActivity() {
         deviceConnectManager.setForeground(false)
         // Only keep an off-screen binding when playback is active/starting, or
         // Listen Together needs to monitor the player while the UI is backgrounded.
-        if (!listenTogetherManager.isInRoom &&
+        if (!listenTogetherManager.isInRoom && !deviceConnectManager.isRemoteActive &&
             playerConnection?.service?.hasActivePlaybackIntent() != true
         ) {
             // The service keeps an additional controller only while music is
@@ -357,7 +357,8 @@ class MainActivity : FragmentActivity() {
             listenTogetherManager.disconnect()
         }
         super.onDestroy()
-        val stopServiceOnClear = dataStore.get(StopMusicOnTaskClearKey, false) && isFinishing
+        val stopServiceOnClear = dataStore.get(StopMusicOnTaskClearKey, false) &&
+            isFinishing && !deviceConnectManager.isRemoteActive
 
         // Full cleanup - only on actual destroy
         playerConnection?.dispose()

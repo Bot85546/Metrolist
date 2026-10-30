@@ -664,6 +664,9 @@ class MusicService :
                 if (session.player !== desired) {
                     session.player = desired
                 }
+                if (deviceConnectManager.isRemoteActive && deviceConnectManager.state.value.remotePlayback?.playing == true) {
+                    connectPlaybackNotificationController()
+                }
             }
         }
         player.repeatMode = startupPrefs!![RepeatModeKey] ?: REPEAT_MODE_OFF
@@ -3779,7 +3782,8 @@ class MusicService :
      */
     fun hasActivePlaybackIntent(): Boolean {
         if (!::player.isInitialized) return false
-        return (player.playWhenReady && player.playbackState != Player.STATE_ENDED) ||
+        return deviceConnectManager.isRemoteActive ||
+            (player.playWhenReady && player.playbackState != Player.STATE_ENDED) ||
             castConnectionHandler?.isCasting?.value == true
     }
 
@@ -3907,7 +3911,7 @@ class MusicService :
         }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        if (dataStore.get(StopMusicOnTaskClearKey, false)) {
+        if (dataStore.get(StopMusicOnTaskClearKey, false) && !deviceConnectManager.isRemoteActive) {
             stopOnTaskClear()
         } else {
             super.onTaskRemoved(rootIntent)
