@@ -98,6 +98,8 @@ class DeviceConnectManager @Inject constructor(
     var sleepTimerProvider: (() -> DeviceSleepTimerSnapshot)? = null
     var volumeProvider: (() -> Float)? = null
     var mutedProvider: (() -> Boolean)? = null
+    var likedProvider: (() -> Boolean?)? = null
+    var onRemoteStopCommand: (() -> Unit)? = null
     var onRemoteSleepTimerCommand: ((Int, Boolean, Boolean) -> Unit)? = null
     var onRemoteVolumeCommand: ((Float) -> Unit)? = null
     var onRemoteMuteCommand: (() -> Unit)? = null
@@ -112,6 +114,17 @@ class DeviceConnectManager @Inject constructor(
     )
 
     private var incomingQueue: IncomingQueue? = null
+    private data class IncomingMirrorQueue(
+        val id: String,
+        val revision: Long,
+        val receivedAtMs: Long,
+        val items: MutableList<DeviceTrack?>,
+        var completed: Boolean = false,
+    )
+    private var incomingMirrorQueue: IncomingMirrorQueue? = null
+    private var cachedMirrorQueue: Pair<Long, List<DeviceTrack>>? = null
+    private var localQueueRevision = 1L
+    private var sentQueueRevision = -1L
 
     val isRemoteActive: Boolean
         get() = authenticated && syncEnabled && remoteOwnsPlayback
@@ -162,6 +175,9 @@ class DeviceConnectManager @Inject constructor(
                     Player.EVENT_VOLUME_CHANGED,
                 )
             ) {
+                if (events.contains(Player.EVENT_TIMELINE_CHANGED) ||
+                    events.contains(Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)
+                ) localQueueRevision++
                 revision++
                 updateTransport()
                 sendSnapshot()
@@ -175,6 +191,7 @@ class DeviceConnectManager @Inject constructor(
         player = target
         remoteMirrorPlayer = RemoteMirrorPlayer(target, this)
         target.addListener(playerListener)
+        localQueueRevision++
         revision++
         updateTransport()
     }
@@ -329,6 +346,8 @@ class DeviceConnectManager @Inject constructor(
         syncEnabled = false
         remoteOwnsPlayback = false
         incomingQueue = null
+        incomingMirrorQueue = null
+        cachedMirrorQueue = null
         latestRemoteRevision = -1L
         _state.value = _state.value.copy(connected = false, remotePlayback = null,
             status = "Disconnected (ready to reconnect)")
@@ -350,6 +369,7 @@ class DeviceConnectManager @Inject constructor(
         preferences.edit().putBoolean("manually_disconnected", false).apply()
         syncEnabled = true
         remoteOwnsPlayback = false
+        sentQueueRevision = -1L
         _state.value = _state.value.copy(connected = true, status = "Connected securely")
         send(DeviceConnectPacket(type = "SYNC_MODE",
             action = if (player?.isPlaying == true) "KEEP_SENDER" else "KEEP_RECEIVER"))
@@ -557,7 +577,10 @@ class DeviceConnectManager @Inject constructor(
                     }
                 }
             }
-            "GET_STATE" -> if (authenticated && syncEnabled) sendSnapshot()
+            "GET_STATE" -> if (authenticated && syncEnabled) {
+                sentQueueRevision = -1L
+                sendSnapshot()
+            }
             "STATE" -> {
                 if (!authenticated || !syncEnabled) return
                 val snapshot = packet.state ?: return
@@ -573,10 +596,45 @@ class DeviceConnectManager @Inject constructor(
                     // from producing a second audio stream after remote ownership is chosen.
                     if (player?.playWhenReady == true) player?.pause()
                 }
-                _state.value = _state.value.copy(
-                    remotePlayback = snapshot.copy(updatedAtMs = SystemClock.elapsedRealtime()),
-                )
+                val fullQueue = cachedMirrorQueue?.takeIf {
+                    it.first == snapshot.queueRevision && it.second.size == snapshot.queueSize
+                }?.second
+                if (snapshot.track == null) cachedMirrorQueue = null
+                _state.value = _state.value.copy(remotePlayback = snapshot.copy(
+                    updatedAtMs = SystemClock.elapsedRealtime(),
+                    queue = if (snapshot.track == null) emptyList() else fullQueue ?: snapshot.queue,
+                    queueStartIndex = if (fullQueue != null || snapshot.track == null) 0 else snapshot.queueStartIndex,
+                ))
                 remoteMirrorPlayer?.notifyStateChanged(oldSnapshot, _state.value.remotePlayback)
+            }
+            "MIRROR_QUEUE_BEGIN" -> {
+                if (!authenticated || !syncEnabled || packet.transferId.length !in 16..64 ||
+                    packet.queueTotal !in 1..1500
+                ) return
+                incomingMirrorQueue = IncomingMirrorQueue(
+                    packet.transferId, packet.queueRevision, SystemClock.elapsedRealtime(),
+                    MutableList(packet.queueTotal) { null },
+                )
+            }
+            "MIRROR_QUEUE_BATCH" -> {
+                if (!authenticated || !syncEnabled) return
+                val pending = incomingMirrorQueue ?: return
+                if (pending.id != packet.transferId ||
+                    SystemClock.elapsedRealtime() - pending.receivedAtMs > 30_000L ||
+                    packet.queueItems.isEmpty() || packet.queueItems.size > 12 ||
+                    packet.queueStart < 0 || packet.queueStart + packet.queueItems.size > pending.items.size
+                ) return
+                packet.queueItems.forEachIndexed { index, track ->
+                    pending.items[packet.queueStart + index] = track
+                }
+                commitMirrorQueueIfReady(pending)
+            }
+            "MIRROR_QUEUE_END" -> {
+                if (!authenticated || !syncEnabled) return
+                val pending = incomingMirrorQueue ?: return
+                if (pending.id != packet.transferId) return
+                pending.completed = true
+                commitMirrorQueueIfReady(pending)
             }
             "COMMAND" -> {
                 if (!authenticated || !syncEnabled || packet.requestId.isBlank()) return
@@ -664,6 +722,11 @@ class DeviceConnectManager @Inject constructor(
                 target.play()
             }
             "PAUSE" -> target.pause()
+            "STOP_AND_CLEAR" -> {
+                onRemoteStopCommand?.invoke()
+                target.stop()
+                target.clearMediaItems()
+            }
             "NEXT" -> if (target.hasNextMediaItem()) target.seekToNextMediaItem()
             "PREVIOUS" -> target.seekToPreviousMediaItem()
             "SEEK_QUEUE" -> {
@@ -715,6 +778,18 @@ class DeviceConnectManager @Inject constructor(
         onRemoteQueue?.invoke(pending.title, pending.items.filterNotNull(), pending.startIndex)
     }
 
+    private fun commitMirrorQueueIfReady(pending: IncomingMirrorQueue) {
+        if (!pending.completed || pending.items.any { it == null }) return
+        incomingMirrorQueue = null
+        val fullQueue = pending.items.filterNotNull()
+        cachedMirrorQueue = pending.revision to fullQueue
+        val old = _state.value.remotePlayback ?: return
+        if (old.queueRevision != pending.revision || old.queueSize != fullQueue.size || old.track == null) return
+        val updated = old.copy(queue = fullQueue, queueStartIndex = 0)
+        _state.value = _state.value.copy(remotePlayback = updated)
+        remoteMirrorPlayer?.notifyStateChanged(old, updated)
+    }
+
     private fun finishAuthentication() {
         if (authenticated) return
         authenticated = true
@@ -726,6 +801,9 @@ class DeviceConnectManager @Inject constructor(
         pendingSecret = null
         sentPairingSecret = false
         latestRemoteRevision = -1L
+        cachedMirrorQueue = null
+        incomingMirrorQueue = null
+        sentQueueRevision = -1L
         handledCommands.clear()
         _state.value = _state.value.copy(
             connected = true,
@@ -780,6 +858,10 @@ class DeviceConnectManager @Inject constructor(
                     queueStartIndex = start,
                     queue = queue,
                     queueTitle = queueTitleProvider?.invoke()?.take(160),
+                    queueRevision = localQueueRevision,
+                    nextQueueIndex = target.nextMediaItemIndex,
+                    previousQueueIndex = target.previousMediaItemIndex,
+                    liked = likedProvider?.invoke(),
                     speed = target.playbackParameters.speed,
                     pitch = target.playbackParameters.pitch,
                     volume = volumeProvider?.invoke()?.coerceIn(0f, 1f) ?: 1f,
@@ -791,6 +873,23 @@ class DeviceConnectManager @Inject constructor(
                 ),
             ),
         )
+        sendMirrorQueueIfChanged(target)
+    }
+
+    /** Send the full queue only when the owner changes its timeline, not for position/timer updates. */
+    private fun sendMirrorQueueIfChanged(target: Player) {
+        if (sentQueueRevision == localQueueRevision) return
+        sentQueueRevision = localQueueRevision
+        val size = target.mediaItemCount
+        if (size !in 1..1500) return
+        val transferId = UUID.randomUUID().toString()
+        send(DeviceConnectPacket(type = "MIRROR_QUEUE_BEGIN", transferId = transferId,
+            queueRevision = localQueueRevision, queueTotal = size))
+        (0 until size).chunked(12).forEach { indices ->
+            send(DeviceConnectPacket(type = "MIRROR_QUEUE_BATCH", transferId = transferId,
+                queueStart = indices.first(), queueItems = indices.map { asDeviceTrack(target.getMediaItemAt(it)) }))
+        }
+        send(DeviceConnectPacket(type = "MIRROR_QUEUE_END", transferId = transferId))
     }
 
     private fun send(packet: DeviceConnectPacket) {
@@ -879,6 +978,9 @@ class DeviceConnectManager @Inject constructor(
         latestRemoteRevision = -1L
         handledCommands.clear()
         incomingQueue = null
+        incomingMirrorQueue = null
+        cachedMirrorQueue = null
+        sentQueueRevision = -1L
         _state.value = _state.value.copy(
             connected = false, peerName = null, remotePlayback = null, pairingRequest = null,
         )

@@ -147,30 +147,20 @@ private fun getMediaItems(
     swipeThumbnail: Boolean
 ): MediaItemsData {
     val timeline = player.currentTimeline
-    val currentIndex = player.currentMediaItemIndex
-    val shuffleModeEnabled = player.shuffleModeEnabled
     
     val currentMediaItem = try {
         player.currentMediaItem
     } catch (e: Exception) { null }
     
     val previousMediaItem = if (swipeThumbnail && !timeline.isEmpty) {
-        val previousIndex = timeline.getPreviousWindowIndex(
-            currentIndex,
-            Player.REPEAT_MODE_OFF,
-            shuffleModeEnabled
-        )
+        val previousIndex = player.previousMediaItemIndex
         if (previousIndex != C.INDEX_UNSET) {
             try { player.getMediaItemAt(previousIndex) } catch (e: Exception) { null }
         } else null
     } else null
 
     val nextMediaItem = if (swipeThumbnail && !timeline.isEmpty) {
-        val nextIndex = timeline.getNextWindowIndex(
-            currentIndex,
-            Player.REPEAT_MODE_OFF,
-            shuffleModeEnabled
-        )
+        val nextIndex = player.nextMediaItemIndex
         if (nextIndex != C.INDEX_UNSET) {
             try { player.getMediaItemAt(nextIndex) } catch (e: Exception) { null }
         } else null

@@ -921,6 +921,10 @@ class MainActivity : FragmentActivity() {
 
                 LaunchedEffect(activePlayerConnection, isRemoteMirror, deviceConnectUi.remotePlayback?.track?.id) {
                     if (isRemoteMirror) {
+                        if (deviceConnectUi.remotePlayback?.track == null) {
+                            if (!playerBottomSheetState.isDismissed) playerBottomSheetState.dismiss()
+                            return@LaunchedEffect
+                        }
                         if (playerBottomSheetState.isDismissed) playerBottomSheetState.collapseSoft()
                         return@LaunchedEffect
                     }

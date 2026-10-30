@@ -628,6 +628,10 @@ class MusicService :
             if (::playerVolume.isInitialized) playerVolume.value else 1f
         }
         deviceConnectManager.mutedProvider = { isMuted.value }
+        deviceConnectManager.likedProvider = {
+            currentSong.value?.song?.let { if (it.isEpisode) it.inLibrary != null else it.liked }
+        }
+        deviceConnectManager.onRemoteStopCommand = { clearAutomix() }
         Timber.tag(TAG).d("Player successfully initialized")
 
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -707,6 +711,7 @@ class MusicService :
                 if (session.player !== desired) {
                     session.player = desired
                 }
+                if (deviceConnectManager.isRemoteActive) updateNotification()
                 if (deviceConnectManager.isRemoteActive && deviceConnectManager.state.value.remotePlayback?.playing == true) {
                     connectPlaybackNotificationController()
                 }
@@ -836,6 +841,7 @@ class MusicService :
         currentSong.debounce(1000).collect(scope) { song ->
             updateNotification()
             updateWidgetUI(player.isPlaying)
+            deviceConnectManager.refreshSnapshot()
         }
 
         combine(
@@ -1438,33 +1444,38 @@ class MusicService :
     }
 
     private fun updateNotification(isLiked: Boolean? = currentSong.value?.song?.let { if (it.isEpisode) it.inLibrary != null else it.liked }) {
+        val remote = deviceConnectManager.state.value.remotePlayback.takeIf { deviceConnectManager.isRemoteActive }
+        val liked = remote?.liked ?: isLiked
+        val shuffleEnabled = remote?.shuffle ?: player.shuffleModeEnabled
+        val activeRepeatMode = remote?.repeatMode ?: player.repeatMode
+        val hasSong = if (remote != null) remote.track != null else currentSong.value != null
         mediaSession?.setCustomLayout(
             listOf(
                 CommandButton
                     .Builder()
-                    .setDisplayName(getString(if (player.shuffleModeEnabled) R.string.action_shuffle_off else R.string.action_shuffle_on))
-                    .setIconResId(if (player.shuffleModeEnabled) R.drawable.shuffle_on else R.drawable.shuffle)
+                    .setDisplayName(getString(if (shuffleEnabled) R.string.action_shuffle_off else R.string.action_shuffle_on))
+                    .setIconResId(if (shuffleEnabled) R.drawable.shuffle_on else R.drawable.shuffle)
                     .setSessionCommand(CommandToggleShuffle)
                     .build(),
                 CommandButton
                     .Builder()
                     .setDisplayName(
                         getString(
-                            if (isLiked == true) {
+                            if (liked == true) {
                                 R.string.action_remove_like
                             } else {
                                 R.string.action_like
                             },
                         ),
-                    ).setIconResId(if (isLiked == true) R.drawable.ic_heart else R.drawable.ic_heart_outline)
+                    ).setIconResId(if (liked == true) R.drawable.ic_heart else R.drawable.ic_heart_outline)
                     .setSessionCommand(CommandToggleLike)
-                    .setEnabled(currentSong.value != null)
+                    .setEnabled(hasSong)
                     .build(),
                 CommandButton
                     .Builder()
                     .setDisplayName(
                         getString(
-                            when (player.repeatMode) {
+                            when (activeRepeatMode) {
                                 REPEAT_MODE_OFF -> R.string.repeat_mode_off
                                 REPEAT_MODE_ONE -> R.string.repeat_mode_one
                                 REPEAT_MODE_ALL -> R.string.repeat_mode_all
@@ -1472,7 +1483,7 @@ class MusicService :
                             },
                         ),
                     ).setIconResId(
-                        when (player.repeatMode) {
+                        when (activeRepeatMode) {
                             REPEAT_MODE_OFF -> R.drawable.repeat
                             REPEAT_MODE_ONE -> R.drawable.repeat_one_on
                             REPEAT_MODE_ALL -> R.drawable.repeat_on
@@ -1485,14 +1496,14 @@ class MusicService :
                     .setDisplayName(getString(R.string.start_radio))
                     .setIconResId(R.drawable.radio)
                     .setSessionCommand(CommandToggleStartRadio)
-                    .setEnabled(currentSong.value != null)
+                    .setEnabled(hasSong)
                     .build(),
                 CommandButton
                     .Builder()
                     .setDisplayName(getString(R.string.android_auto_target_playlist))
                     .setIconResId(R.drawable.playlist_add)
                     .setSessionCommand(CommandAddToTargetPlaylist)
-                    .setEnabled(currentSong.value != null)
+                    .setEnabled(hasSong)
                     .build(),
             ),
         )

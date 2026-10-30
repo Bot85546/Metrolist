@@ -21,6 +21,10 @@ class DeviceConnectProtocolTest {
             queueStartIndex = 7,
             queue = listOf(DeviceTrack("id1", "Song", "Artist"), DeviceTrack("id2", "Next", "Artist")),
             queueTitle = "Liked",
+            queueRevision = 12,
+            nextQueueIndex = 9,
+            previousQueueIndex = 6,
+            liked = true,
             speed = 1.25f,
             pitch = 1.1f,
             volume = 0.45f,
@@ -44,6 +48,19 @@ class DeviceConnectProtocolTest {
         val batch = DeviceConnectPacket(type = "QUEUE_BATCH", transferId = begin.transferId, queueItems = tracks)
         assertEquals(begin, DeviceConnectProtocol.decode(DeviceConnectProtocol.encode(begin)))
         assertEquals(batch, DeviceConnectProtocol.decode(DeviceConnectProtocol.encode(batch)))
+    }
+
+    @Test
+    fun mirrorQueueTransferPreservesOwnerRevisionAndOrdering() {
+        val tracks = (0 until 12).map { DeviceTrack("track-$it", "Song $it", "Artist") }
+        val begin = DeviceConnectPacket(type = "MIRROR_QUEUE_BEGIN", transferId = "mirror-token-123456789",
+            queueRevision = 17, queueTotal = 24)
+        val batch = DeviceConnectPacket(type = "MIRROR_QUEUE_BATCH", transferId = begin.transferId,
+            queueRevision = 17, queueStart = 12, queueItems = tracks)
+        val end = DeviceConnectPacket(type = "MIRROR_QUEUE_END", transferId = begin.transferId)
+        listOf(begin, batch, end).forEach { packet ->
+            assertEquals(packet, DeviceConnectProtocol.decode(DeviceConnectProtocol.encode(packet)))
+        }
     }
 
     @Test
@@ -83,6 +100,7 @@ class DeviceConnectProtocolTest {
                 stopAfterSong = true, fadeOut = true, requestId = "timer-1"),
             DeviceConnectPacket(type = "COMMAND", action = "SET_VOLUME", volume = 0.6f,
                 requestId = "volume-1"),
+            DeviceConnectPacket(type = "COMMAND", action = "STOP_AND_CLEAR", requestId = "stop-1"),
             DeviceConnectPacket(type = "SYNC_MODE", action = "KEEP_SENDER"),
         ).forEach { command ->
             assertEquals(command, DeviceConnectProtocol.decode(DeviceConnectProtocol.encode(command)))

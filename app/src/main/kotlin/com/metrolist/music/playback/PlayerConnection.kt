@@ -235,7 +235,15 @@ class PlayerConnection(
                 if (desired != null && desired !== attachedPlayer) updateAttachedPlayer(desired)
                 if (useRemote) {
                     val snapshot = connection.remotePlayback ?: return@collect
-                    val track = snapshot.track ?: return@collect
+                    val track = snapshot.track
+                    if (track == null) {
+                        mediaMetadata.value = null
+                        queueWindows.value = emptyList()
+                        canSkipNext.value = false
+                        canSkipPrevious.value = false
+                        playbackState.value = Player.STATE_IDLE
+                        return@collect
+                    }
                     mediaMetadata.value = MediaMetadata(
                         id = track.id,
                         title = track.title,
@@ -249,8 +257,8 @@ class PlayerConnection(
                     shuffleModeEnabled.value = snapshot.shuffle
                     currentMediaItemIndex.value = mirror!!.currentMediaItemIndex
                     queueTitle.value = snapshot.queueTitle
-                    canSkipPrevious.value = snapshot.queueIndex > 0
-                    canSkipNext.value = snapshot.queueIndex < snapshot.queueSize - 1
+                    canSkipPrevious.value = snapshot.previousQueueIndex >= 0
+                    canSkipNext.value = snapshot.nextQueueIndex >= 0
                     isMuted.value = snapshot.muted
                 } else {
                     isMuted.value = service.isMuted.value
@@ -414,8 +422,8 @@ class PlayerConnection(
     }
 
     fun setPlayerVolume(volume: Float) {
-        if (deviceConnectManager.isRemoteActive) deviceConnectManager.sendVolume(volume)
-        else service.playerVolume.value = volume
+        // Android volume on this device is deliberately independent of the remote output.
+        service.playerVolume.value = volume
     }
 
     fun toggleLibrary() {

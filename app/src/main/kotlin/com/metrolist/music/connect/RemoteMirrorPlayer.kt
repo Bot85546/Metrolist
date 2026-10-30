@@ -2,7 +2,6 @@ package com.metrolist.music.connect
 
 import android.os.SystemClock
 import androidx.media3.common.C
-import androidx.media3.common.DeviceInfo
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -25,8 +24,6 @@ class RemoteMirrorPlayer(
     private var cachedState: DevicePlaybackState? = null
     private var cachedTimeline: Timeline = Timeline.EMPTY
     private val observers = LinkedHashSet<Player.Listener>()
-
-    private val remoteDeviceInfo = DeviceInfo.Builder(DeviceInfo.PLAYBACK_TYPE_REMOTE).build()
 
     // The inactive local ExoPlayer has no seek/skip commands. The remote session must advertise
     // its own capabilities or Android's media controls hide the previous/next buttons.
@@ -86,9 +83,7 @@ class RemoteMirrorPlayer(
             .add(Player.EVENT_REPEAT_MODE_CHANGED)
             .add(Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)
             .add(Player.EVENT_AVAILABLE_COMMANDS_CHANGED)
-            .add(Player.EVENT_DEVICE_INFO_CHANGED)
             .add(Player.EVENT_PLAYBACK_PARAMETERS_CHANGED)
-            .add(Player.EVENT_VOLUME_CHANGED)
             .build())
         observers.toList().forEach { listener ->
             listener.onTimelineChanged(currentTimeline, Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED)
@@ -102,8 +97,6 @@ class RemoteMirrorPlayer(
             listener.onShuffleModeEnabledChanged(shuffleModeEnabled)
             listener.onRepeatModeChanged(repeatMode)
             listener.onPlaybackParametersChanged(playbackParameters)
-            listener.onVolumeChanged(volume)
-            listener.onDeviceInfoChanged(deviceInfo)
             listener.onAvailableCommandsChanged(availableCommands)
             listener.onEvents(this, flags)
         }
@@ -126,11 +119,8 @@ class RemoteMirrorPlayer(
 
     override fun getAvailableCommands(): Player.Commands = remoteCommands
 
-    override fun getDeviceInfo(): DeviceInfo = remoteDeviceInfo
-
-    override fun getVolume(): Float = remote?.volume ?: 1f
-
-    override fun setVolume(volume: Float) = connect.sendVolume(volume)
+    // Preserve the controller's Android output route and hardware-volume keys. Remote
+    // playback metadata must not advertise a second, synthetic volume device.
 
     override fun getPlaybackParameters(): PlaybackParameters = PlaybackParameters(
         remote?.speed ?: 1f,
@@ -182,17 +172,13 @@ class RemoteMirrorPlayer(
 
     override fun getShuffleModeEnabled(): Boolean = remote?.shuffle == true
 
-    override fun getNextMediaItemIndex(): Int = when {
-        currentMediaItemIndex + 1 < mediaItemCount -> currentMediaItemIndex + 1
-        remote?.let { it.queueIndex < it.queueSize - 1 } == true -> currentMediaItemIndex
-        else -> C.INDEX_UNSET
-    }
+    override fun getNextMediaItemIndex(): Int = remote?.nextQueueIndex?.takeIf { it >= 0 }
+        ?.let { (it - (remote?.queueStartIndex ?: 0)).takeIf { index -> index in 0 until mediaItemCount }
+            ?: currentMediaItemIndex } ?: C.INDEX_UNSET
 
-    override fun getPreviousMediaItemIndex(): Int = when {
-        currentMediaItemIndex > 0 -> currentMediaItemIndex - 1
-        remote?.let { it.queueIndex > 0 } == true -> currentMediaItemIndex
-        else -> C.INDEX_UNSET
-    }
+    override fun getPreviousMediaItemIndex(): Int = remote?.previousQueueIndex?.takeIf { it >= 0 }
+        ?.let { (it - (remote?.queueStartIndex ?: 0)).takeIf { index -> index in 0 until mediaItemCount }
+            ?: currentMediaItemIndex } ?: C.INDEX_UNSET
 
     override fun setPlayWhenReady(playWhenReady: Boolean) = connect.sendCommand(if (playWhenReady) "PLAY" else "PAUSE")
 
@@ -233,7 +219,7 @@ class RemoteMirrorPlayer(
         if (repeatMode != this.repeatMode) connect.sendCommand("SET_REPEAT", repeatMode.toLong())
     }
 
-    override fun stop() = connect.sendCommand("PAUSE")
+    override fun stop() = connect.sendCommand("STOP_AND_CLEAR")
 
     override fun clearMediaItems() = Unit
 
