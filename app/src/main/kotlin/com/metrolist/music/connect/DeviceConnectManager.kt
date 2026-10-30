@@ -63,6 +63,7 @@ class DeviceConnectManager @Inject constructor(
     }
 
     private val trust = DeviceConnectTrustStore(context)
+    private var trustedPeer = trust.trustedDevice()
     private val transport = DeviceConnectTransportFactory.create(context).also { it.listener = this }
     private val handler = Handler(Looper.getMainLooper())
     private val name = Build.MODEL.take(45).replace('|', ' ')
@@ -70,7 +71,7 @@ class DeviceConnectManager @Inject constructor(
     private val _state = MutableStateFlow(
         DeviceConnectUiState(
             available = transport.available,
-            trustedDeviceName = trust.trustedDevice()?.name,
+            trustedDeviceName = trustedPeer?.name,
         ),
     )
     val state = _state.asStateFlow()
@@ -203,6 +204,7 @@ class DeviceConnectManager @Inject constructor(
     fun forgetDevice() {
         disconnect()
         trust.forget()
+        trustedPeer = null
         _state.value = _state.value.copy(trustedDeviceName = null, status = "Device forgotten")
     }
 
@@ -222,7 +224,7 @@ class DeviceConnectManager @Inject constructor(
         if (this.endpointId != null || manuallyDisconnected || !foreground) return
         val remote = DeviceEndpoint.decode(endpointName) ?: return
         if (remote.id == ownEndpoint.id) return
-        val trusted = trust.trustedDevice()?.id == remote.id
+        val trusted = trustedPeer?.id == remote.id
         if (!trusted && !pairingMode) return
         if (pairingMode && !trusted && ownEndpoint.id > remote.id) return
         if (player?.isPlaying == true && !pairingMode) return
@@ -247,7 +249,7 @@ class DeviceConnectManager @Inject constructor(
         }
         this.endpointId = endpointId
         peer = remote
-        if (trust.trustedDevice()?.id == remote.id) {
+        if (trustedPeer?.id == remote.id) {
             _state.value = _state.value.copy(status = "Verifying paired device…")
             transport.accept(endpointId)
         } else if (pairingMode && foreground) {
@@ -299,7 +301,7 @@ class DeviceConnectManager @Inject constructor(
                     return
                 }
                 peerNonce = packet.nonce
-                val saved = trust.trustedDevice()
+                val saved = trustedPeer
                 if (saved?.id == remote.id) {
                     send(
                         DeviceConnectPacket(
@@ -319,7 +321,7 @@ class DeviceConnectManager @Inject constructor(
                 }
             }
             "AUTH" -> {
-                val saved = trust.trustedDevice() ?: return
+                val saved = trustedPeer ?: return
                 if (saved.id != remote.id || peerNonce.isBlank()) return
                 val expected = trust.proof(
                     saved.secret,
@@ -329,13 +331,14 @@ class DeviceConnectManager @Inject constructor(
                 else resetConnection(closeEndpoint = true)
             }
             "PAIR" -> {
-                if (acceptedUntrustedEndpoint != endpointId || !pairingMode || trust.trustedDevice() != null) return
+                if (acceptedUntrustedEndpoint != endpointId || !pairingMode || trustedPeer != null) return
                 if (runCatching { android.util.Base64.decode(packet.secret, android.util.Base64.NO_WRAP) }.getOrNull()?.size != 32) {
                     resetConnection(closeEndpoint = true)
                     return
                 }
                 runCatching { trust.save(TrustedDevice(remote.id, remote.name, packet.secret)) }
                     .onSuccess {
+                        trustedPeer = TrustedDevice(remote.id, remote.name, packet.secret)
                         send(DeviceConnectPacket(
                             type = "PAIR_ACK",
                             proof = trust.proof(packet.secret, "paired|${ownEndpoint.id}|${remote.id}"),
@@ -350,7 +353,10 @@ class DeviceConnectManager @Inject constructor(
                     return
                 }
                 runCatching { trust.save(TrustedDevice(remote.id, remote.name, secret)) }
-                    .onSuccess { finishAuthentication() }
+                    .onSuccess {
+                        trustedPeer = TrustedDevice(remote.id, remote.name, secret)
+                        finishAuthentication()
+                    }
                     .onFailure { failed("Could not store secure pairing") }
             }
             "GET_STATE" -> if (authenticated) sendSnapshot()
@@ -390,7 +396,10 @@ class DeviceConnectManager @Inject constructor(
         // The owner alone changes playback; a remote-controlled idle device never starts a stream.
         if (target.currentMediaItem == null) return
         when (packet.action) {
-            "PLAY" -> target.play()
+            "PLAY" -> {
+                if (target.playbackState == Player.STATE_IDLE) target.prepare()
+                target.play()
+            }
             "PAUSE" -> target.pause()
             "NEXT" -> if (target.hasNextMediaItem()) target.seekToNextMediaItem()
             "PREVIOUS" -> target.seekToPreviousMediaItem()
@@ -414,7 +423,7 @@ class DeviceConnectManager @Inject constructor(
         _state.value = _state.value.copy(
             connected = true,
             peerName = peer?.name,
-            trustedDeviceName = trust.trustedDevice()?.name,
+            trustedDeviceName = trustedPeer?.name,
             pairingMode = false,
             pairingRequest = null,
             status = "Connected securely",
@@ -482,7 +491,7 @@ class DeviceConnectManager @Inject constructor(
             return
         }
         val hasSession = player?.isPlaying == true || player?.playWhenReady == true
-        if (trust.trustedDevice() != null && hasSession || pairingMode) {
+        if ((trustedPeer != null && hasSession) || pairingMode) {
             transport.advertise(ownEndpoint.encode())
         } else {
             transport.stopAdvertising()
