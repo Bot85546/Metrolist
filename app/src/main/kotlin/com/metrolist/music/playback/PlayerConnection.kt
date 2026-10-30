@@ -58,7 +58,7 @@ class PlayerConnection(
     context: Context,
     binder: MusicBinder,
     val database: MusicDatabase,
-    scope: CoroutineScope,
+    private val scope: CoroutineScope,
     private val deviceConnectManager: DeviceConnectManager,
 ) : Player.Listener {
     private companion object {
@@ -274,6 +274,14 @@ class PlayerConnection(
     }
 
     fun playQueue(queue: Queue) {
+        if (deviceConnectManager.isRemoteActive) {
+            scope.launch {
+                runCatching { queue.getInitialStatus() }
+                    .onSuccess { deviceConnectManager.submitRemoteQueue(it) }
+                    .onFailure { Timber.tag(TAG).e(it, "Unable to share selected queue with playing device") }
+            }
+            return
+        }
         // Block if Listen Together guest (unless internal sync)
         if (!allowInternalSync && shouldBlockPlaybackChanges?.invoke() == true) {
             Timber.tag("PlayerConnection").d("playQueue blocked - Listen Together guest")

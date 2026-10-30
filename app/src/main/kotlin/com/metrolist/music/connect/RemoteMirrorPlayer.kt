@@ -7,6 +7,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
+import androidx.media3.common.util.FlagSet
 import com.metrolist.music.extensions.toMediaItem
 import com.metrolist.music.models.MediaMetadata as MetrolittMetadata
 
@@ -27,7 +28,12 @@ class RemoteMirrorPlayer(
         if (snapshot !== cachedState) {
             cachedState = snapshot
             val entries = snapshot?.queue.orEmpty().ifEmpty { listOfNotNull(snapshot?.track) }
-            cachedTimeline = if (entries.isEmpty()) Timeline.EMPTY else RemoteQueueTimeline(entries, snapshot?.durationMs ?: 0L)
+            cachedTimeline = if (entries.isEmpty()) Timeline.EMPTY else RemoteQueueTimeline(
+                entries,
+                snapshot?.durationMs ?: 0L,
+                if (snapshot?.queue.isNullOrEmpty()) 0 else
+                    ((snapshot?.queueIndex ?: 0) - (snapshot?.queueStartIndex ?: 0)).coerceIn(0, entries.lastIndex),
+            )
         }
         return cachedTimeline
     }
@@ -42,7 +48,7 @@ class RemoteMirrorPlayer(
 
     fun notifyStateChanged(previous: DevicePlaybackState?, current: DevicePlaybackState?) {
         cachedState = null
-        val flags = Player.Events.Builder()
+        val flags = Player.Events(FlagSet.Builder()
             .add(Player.EVENT_MEDIA_ITEM_TRANSITION)
             .add(Player.EVENT_MEDIA_METADATA_CHANGED)
             .add(Player.EVENT_TIMELINE_CHANGED)
@@ -52,7 +58,7 @@ class RemoteMirrorPlayer(
             .add(Player.EVENT_POSITION_DISCONTINUITY)
             .add(Player.EVENT_REPEAT_MODE_CHANGED)
             .add(Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)
-            .build()
+            .build())
         observers.toList().forEach { listener ->
             listener.onTimelineChanged(currentTimeline, Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED)
             if (previous?.track != current?.track) {
@@ -62,7 +68,7 @@ class RemoteMirrorPlayer(
             listener.onPlaybackStateChanged(playbackState)
             listener.onPlayWhenReadyChanged(playWhenReady, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
             listener.onIsPlayingChanged(isPlaying)
-            listener.onShuffleModeEnabledChanged(isShuffleModeEnabled)
+            listener.onShuffleModeEnabledChanged(shuffleModeEnabled)
             listener.onRepeatModeChanged(repeatMode)
             listener.onEvents(this, flags)
         }
@@ -95,19 +101,27 @@ class RemoteMirrorPlayer(
 
     override fun getPlaybackState(): Int = if (remote?.track != null) Player.STATE_READY else Player.STATE_IDLE
 
+    override fun getPlaybackSuppressionReason(): Int = Player.PLAYBACK_SUPPRESSION_REASON_NONE
+
     override fun getPlayWhenReady(): Boolean = remote?.playing == true
 
     override fun isPlaying(): Boolean = remote?.playing == true
 
     override fun getRepeatMode(): Int = remote?.repeatMode ?: Player.REPEAT_MODE_OFF
 
-    override fun isShuffleModeEnabled(): Boolean = remote?.shuffle == true
+    override fun getShuffleModeEnabled(): Boolean = remote?.shuffle == true
 
-    override fun getNextMediaItemIndex(): Int =
-        if (currentMediaItemIndex + 1 < mediaItemCount) currentMediaItemIndex + 1 else C.INDEX_UNSET
+    override fun getNextMediaItemIndex(): Int = when {
+        currentMediaItemIndex + 1 < mediaItemCount -> currentMediaItemIndex + 1
+        remote?.let { it.queueIndex < it.queueSize - 1 } == true -> currentMediaItemIndex
+        else -> C.INDEX_UNSET
+    }
 
-    override fun getPreviousMediaItemIndex(): Int =
-        if (currentMediaItemIndex > 0) currentMediaItemIndex - 1 else C.INDEX_UNSET
+    override fun getPreviousMediaItemIndex(): Int = when {
+        currentMediaItemIndex > 0 -> currentMediaItemIndex - 1
+        remote?.let { it.queueIndex > 0 } == true -> currentMediaItemIndex
+        else -> C.INDEX_UNSET
+    }
 
     override fun setPlayWhenReady(playWhenReady: Boolean) = connect.sendCommand(if (playWhenReady) "PLAY" else "PAUSE")
 
@@ -118,6 +132,10 @@ class RemoteMirrorPlayer(
     override fun prepare() = Unit
 
     override fun seekTo(positionMs: Long) = connect.sendCommand("SEEK", positionMs)
+
+    override fun seekBack() = seekTo((currentPosition - seekBackIncrement).coerceAtLeast(0L))
+
+    override fun seekForward() = seekTo((currentPosition + seekForwardIncrement).coerceAtMost(duration))
 
     override fun seekTo(mediaItemIndex: Int, positionMs: Long) {
         val snapshot = remote ?: return
@@ -137,7 +155,7 @@ class RemoteMirrorPlayer(
     override fun seekToPreviousMediaItem() = connect.sendCommand("PREVIOUS")
 
     override fun setShuffleModeEnabled(shuffleModeEnabled: Boolean) {
-        if (shuffleModeEnabled != isShuffleModeEnabled) connect.sendCommand("SHUFFLE")
+        if (shuffleModeEnabled != this.shuffleModeEnabled) connect.sendCommand("SHUFFLE")
     }
 
     override fun setRepeatMode(repeatMode: Int) {
@@ -165,7 +183,7 @@ class RemoteMirrorPlayer(
     }
 }
 
-private fun DeviceTrack.asMediaItem(durationMs: Long): MediaItem =
+internal fun DeviceTrack.asMediaItem(durationMs: Long): MediaItem =
     MetrolittMetadata(
         id = id,
         title = title,
@@ -177,13 +195,14 @@ private fun DeviceTrack.asMediaItem(durationMs: Long): MediaItem =
 private class RemoteQueueTimeline(
     private val entries: List<DeviceTrack>,
     private val currentDurationMs: Long,
+    private val currentIndex: Int,
 ) : Timeline() {
     override fun getWindowCount(): Int = entries.size
 
     override fun getPeriodCount(): Int = entries.size
 
     override fun getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Long): Window {
-        val durationUs = if (windowIndex == 0 && currentDurationMs > 0) currentDurationMs * 1000 else C.TIME_UNSET
+        val durationUs = if (windowIndex == currentIndex && currentDurationMs > 0) currentDurationMs * 1000 else C.TIME_UNSET
         return window.set(
             windowIndex,
             entries[windowIndex].asMediaItem(if (durationUs > 0) currentDurationMs else 0),

@@ -39,6 +39,11 @@ data class DeviceConnectPacket(
     val argument: Long = 0,
     val requestId: String = "",
     val state: DevicePlaybackState? = null,
+    val transferId: String = "",
+    val queueTotal: Int = 0,
+    val queueStart: Int = 0,
+    val queueTitle: String = "",
+    val queueItems: List<DeviceTrack> = emptyList(),
 )
 
 object DeviceConnectProtocol {

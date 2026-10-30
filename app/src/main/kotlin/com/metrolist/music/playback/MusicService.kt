@@ -160,6 +160,7 @@ import com.metrolist.music.extensions.metadata
 import com.metrolist.music.extensions.setOffloadEnabled
 import com.metrolist.music.extensions.toEnum
 import com.metrolist.music.extensions.toMediaItem
+import com.metrolist.music.connect.asMediaItem
 import com.metrolist.music.extensions.toPersistQueue
 import com.metrolist.music.extensions.toQueue
 import com.metrolist.music.lyrics.LyricsHelper
@@ -638,6 +639,11 @@ class MusicService :
             when (action) {
                 "TOGGLE_LIKE" -> toggleLike()
                 "TOGGLE_LIBRARY" -> toggleLibrary()
+            }
+        }
+        deviceConnectManager.onRemoteQueue = { title, tracks, startIndex ->
+            if (!deviceConnectManager.isRemoteActive && tracks.isNotEmpty()) {
+                playQueue(ListQueue(title = title, items = tracks.map { it.asMediaItem(0L) }, startIndex = startIndex))
             }
         }
         scope.launch {
@@ -3825,6 +3831,7 @@ class MusicService :
 
     override fun onDestroy() {
         deviceConnectManager.onRemoteLibraryCommand = null
+        deviceConnectManager.onRemoteQueue = null
         isRunning = false
 
         if (!::player.isInitialized) {

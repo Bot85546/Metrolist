@@ -26,6 +26,18 @@ class DeviceConnectProtocolTest {
     }
 
     @Test
+    fun playlistTransferRoundTripPreservesOrderedTracksAndStartPosition() {
+        val tracks = listOf(
+            DeviceTrack("song1", "First", "Singer", "https://example.com/1.jpg"),
+            DeviceTrack("song2", "Second", "Singer", "https://example.com/2.jpg"),
+        )
+        val begin = DeviceConnectPacket(type = "QUEUE_BEGIN", transferId = "queue-token-123456789", queueTotal = 2, queueStart = 1)
+        val batch = DeviceConnectPacket(type = "QUEUE_BATCH", transferId = begin.transferId, queueItems = tracks)
+        assertEquals(begin, DeviceConnectProtocol.decode(DeviceConnectProtocol.encode(begin)))
+        assertEquals(batch, DeviceConnectProtocol.decode(DeviceConnectProtocol.encode(batch)))
+    }
+
+    @Test
     fun rejectsInvalidAndOversizePayloads() {
         assertNull(DeviceConnectProtocol.decode(byteArrayOf()))
         assertNull(DeviceConnectProtocol.decode("{".encodeToByteArray()))

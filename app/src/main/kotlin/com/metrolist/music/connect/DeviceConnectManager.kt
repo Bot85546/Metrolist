@@ -10,6 +10,7 @@ import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import androidx.media3.common.C
 import androidx.media3.common.Player
+import com.metrolist.music.playback.queues.Queue
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -63,6 +64,7 @@ class DeviceConnectManager @Inject constructor(
     }
 
     private val trust = DeviceConnectTrustStore(context)
+    private val preferences = context.getSharedPreferences("device_connect_settings", Context.MODE_PRIVATE)
     private var trustedPeer = trust.trustedDevice()
     private val transport = DeviceConnectTransportFactory.create(context).also { it.listener = this }
     private val handler = Handler(Looper.getMainLooper())
@@ -80,13 +82,25 @@ class DeviceConnectManager @Inject constructor(
     var remoteMirrorPlayer: RemoteMirrorPlayer? = null
         private set
     var onRemoteLibraryCommand: ((String) -> Unit)? = null
+    var onRemoteQueue: ((String?, List<DeviceTrack>, Int) -> Unit)? = null
+
+    private data class IncomingQueue(
+        val id: String,
+        val title: String?,
+        val startIndex: Int,
+        val receivedAtMs: Long,
+        val items: MutableList<DeviceTrack?>,
+        var completed: Boolean = false,
+    )
+
+    private var incomingQueue: IncomingQueue? = null
 
     val isRemoteActive: Boolean
         get() = authenticated && _state.value.remotePlayback?.track != null &&
             player?.isPlaying != true && player?.playWhenReady != true
     private var foreground = false
     private var pairingMode = false
-    private var manuallyDisconnected = false
+    private var manuallyDisconnected = preferences.getBoolean("manually_disconnected", false)
     private var discoveryUntilMs = 0L
     private var reconnectAttempts = 0
     private var reconnectGeneration = 0L
@@ -176,6 +190,7 @@ class DeviceConnectManager @Inject constructor(
         if (!transport.available) return
         pairingMode = true
         manuallyDisconnected = false
+        preferences.edit().putBoolean("manually_disconnected", false).apply()
         discoveryUntilMs = SystemClock.elapsedRealtime() + DISCOVERY_WINDOW_MS
         _state.value = _state.value.copy(pairingMode = true, status = "Searching for your other Galaxy device…")
         updateTransport()
@@ -190,6 +205,7 @@ class DeviceConnectManager @Inject constructor(
 
     fun searchAgain() {
         manuallyDisconnected = false
+        preferences.edit().putBoolean("manually_disconnected", false).apply()
         reconnectAttempts = 0
         reconnectGeneration++
         discoveryUntilMs = SystemClock.elapsedRealtime() + DISCOVERY_WINDOW_MS
@@ -214,6 +230,7 @@ class DeviceConnectManager @Inject constructor(
 
     fun disconnect() {
         manuallyDisconnected = true
+        preferences.edit().putBoolean("manually_disconnected", true).apply()
         reconnectGeneration++
         resetConnection(closeEndpoint = true)
         _state.value = _state.value.copy(status = "Disconnected by you")
@@ -237,6 +254,32 @@ class DeviceConnectManager @Inject constructor(
                 requestId = UUID.randomUUID().toString(),
             ),
         )
+    }
+
+    /** Transfers the selected playlist without decoding or streaming any audio on this device. */
+    fun submitRemoteQueue(status: Queue.Status) {
+        if (!isRemoteActive || status.items.isEmpty()) return
+        val source = status.items.take(1500)
+        val transferId = UUID.randomUUID().toString()
+        send(DeviceConnectPacket(
+            type = "QUEUE_BEGIN", transferId = transferId,
+            queueTitle = status.title.orEmpty(), queueTotal = source.size,
+            queueStart = status.mediaItemIndex.coerceIn(0, source.lastIndex),
+        ))
+        source.chunked(12).forEachIndexed { chunk, items ->
+            send(DeviceConnectPacket(
+                type = "QUEUE_BATCH", transferId = transferId, queueStart = chunk * 12,
+                queueItems = items.map { item ->
+                    DeviceTrack(
+                        item.mediaId,
+                        item.mediaMetadata.title?.toString().orEmpty(),
+                        item.mediaMetadata.artist?.toString().orEmpty(),
+                        item.mediaMetadata.artworkUri?.toString(),
+                    )
+                },
+            ))
+        }
+        send(DeviceConnectPacket(type = "QUEUE_END", transferId = transferId))
     }
 
     override fun discovered(endpointId: String, endpointName: String) {
@@ -394,6 +437,38 @@ class DeviceConnectManager @Inject constructor(
                 if (!authenticated || packet.requestId.isBlank()) return
                 applyCommand(packet)
             }
+            "QUEUE_BEGIN" -> {
+                if (!authenticated || packet.transferId.length !in 16..64 || packet.queueTotal !in 1..1500 ||
+                    packet.queueStart !in 0 until packet.queueTotal
+                ) return
+                incomingQueue = IncomingQueue(
+                    id = packet.transferId,
+                    title = packet.queueTitle.take(160).ifBlank { null },
+                    startIndex = packet.queueStart,
+                    receivedAtMs = SystemClock.elapsedRealtime(),
+                    items = MutableList(packet.queueTotal) { null },
+                )
+            }
+            "QUEUE_BATCH" -> {
+                if (!authenticated) return
+                val pending = incomingQueue ?: return
+                if (pending.id != packet.transferId ||
+                    SystemClock.elapsedRealtime() - pending.receivedAtMs > 30_000L ||
+                    packet.queueItems.isEmpty() || packet.queueItems.size > 12 ||
+                    packet.queueStart < 0 || packet.queueStart + packet.queueItems.size > pending.items.size
+                ) return
+                packet.queueItems.forEachIndexed { index, track ->
+                    pending.items[packet.queueStart + index] = track
+                }
+                commitIncomingQueueIfReady(pending)
+            }
+            "QUEUE_END" -> {
+                if (!authenticated) return
+                val pending = incomingQueue ?: return
+                if (pending.id != packet.transferId) return
+                pending.completed = true
+                commitIncomingQueueIfReady(pending)
+            }
             "DISCONNECT" -> {
                 resetConnection(closeEndpoint = true)
                 _state.value = _state.value.copy(status = "Other device disconnected")
@@ -449,6 +524,12 @@ class DeviceConnectManager @Inject constructor(
         }
         revision++
         sendSnapshot()
+    }
+
+    private fun commitIncomingQueueIfReady(pending: IncomingQueue) {
+        if (!pending.completed || pending.items.any { it == null }) return
+        incomingQueue = null
+        onRemoteQueue?.invoke(pending.title, pending.items.filterNotNull(), pending.startIndex)
     }
 
     private fun finishAuthentication() {
@@ -590,6 +671,7 @@ class DeviceConnectManager @Inject constructor(
         peerNonce = ""
         latestRemoteRevision = -1L
         handledCommands.clear()
+        incomingQueue = null
         _state.value = _state.value.copy(
             connected = false, peerName = null, remotePlayback = null, pairingRequest = null,
         )
