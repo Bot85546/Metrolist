@@ -772,7 +772,9 @@ class DeviceConnectManager @Inject constructor(
                     return
                 }
                 sendSnapshot()
-                val handoff = lastLocalSnapshot ?: return
+                // Never auto-play after switching output: the new device may be using its
+                // loudspeaker until the user's earbuds have connected to it.
+                val handoff = lastLocalSnapshot?.copy(playing = false) ?: return
                 target.pause()
                 onRemoteOutputReleased?.invoke()
                 target.stop()
@@ -798,7 +800,7 @@ class DeviceConnectManager @Inject constructor(
                 pendingTakeoverQueueRevision = -1L
                 val old = _state.value.remotePlayback
                 remoteOwnsPlayback = false
-                _state.value = _state.value.copy(remotePlayback = null, status = "Playing on this device")
+                _state.value = _state.value.copy(remotePlayback = null, status = "Ready to play on this device")
                 notifyRemotePlayers(old, null)
                 onRemoteOutputHandoff?.invoke(handoff, fullQueue)
             }

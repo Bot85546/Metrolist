@@ -640,6 +640,9 @@ class MusicService :
             val start = orderedTracks.indexOfFirst { it.sourceIndex == handoff.queueIndex }
             if (start >= 0 && orderedTracks.isNotEmpty()) {
                 clearAutomix()
+                // Output switching is intentionally a paused handoff. Never let an old
+                // playWhenReady flag start the new device's speaker before Buds connect.
+                player.pause()
                 val mediaItems = orderedTracks.map { it.asMediaItem(0L) }
                 player.setMediaItems(mediaItems, start, handoff.positionMs.coerceAtLeast(0L))
                 queueTitle = handoff.queueTitle
@@ -659,7 +662,6 @@ class MusicService :
                     sleepTimer?.start(minutes, handoff.sleepTimerStopAfterSong, handoff.sleepTimerFadeOut)
                 }
                 player.prepare()
-                if (handoff.playing) player.play()
             }
         }
         Timber.tag(TAG).d("Player successfully initialized")
@@ -4084,7 +4086,13 @@ class MusicService :
     ) {
         if (taskCleared) return
         try {
-            super.onUpdateNotification(session, startInForegroundRequired)
+            // Android normally drops a paused session's notification after a period of
+            // inactivity. Our controller's platform session is intentionally passive to
+            // prevent Samsung Buds switching, even while the other device is playing.
+            val peerIsPlaying = ::deviceConnectManager.isInitialized &&
+                deviceConnectManager.isRemoteActive &&
+                deviceConnectManager.state.value.remotePlayback?.playing == true
+            super.onUpdateNotification(session, startInForegroundRequired || peerIsPlaying)
         } catch (e: ForegroundServiceStartNotAllowedException) {
             handleForegroundServiceStartNotAllowed(e)
         } catch (e: IllegalStateException) {
