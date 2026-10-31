@@ -1498,7 +1498,7 @@ class MusicService :
                 CommandButton
                     .Builder()
                     .setDisplayName(getString(if (shuffleEnabled) R.string.action_shuffle_off else R.string.action_shuffle_on))
-                    .setIconResId(if (shuffleEnabled) R.drawable.shuffle_on else R.drawable.shuffle)
+                    .setIconResId(if (shuffleEnabled) R.drawable.notification_shuffle_on else R.drawable.notification_shuffle)
                     .setSessionCommand(CommandToggleShuffle)
                     .build(),
                 CommandButton
@@ -1511,7 +1511,7 @@ class MusicService :
                                 R.string.action_like
                             },
                         ),
-                    ).setIconResId(if (liked == true) R.drawable.ic_heart else R.drawable.ic_heart_outline)
+                    ).setIconResId(if (liked == true) R.drawable.notification_like else R.drawable.notification_like_outline)
                     .setSessionCommand(CommandToggleLike)
                     .setEnabled(hasSong)
                     .build(),
