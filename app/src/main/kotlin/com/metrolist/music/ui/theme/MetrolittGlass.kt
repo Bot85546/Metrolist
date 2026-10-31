@@ -1,13 +1,14 @@
 package com.metrolist.music.ui.theme
 
 import android.os.Build
+import androidx.compose.foundation.background
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalView
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
@@ -18,7 +19,7 @@ val LocalMetrolittBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
 @Composable
 fun Modifier.metrolittGlass(shape: Shape, tint: Color): Modifier {
     val backdrop = LocalMetrolittBackdrop.current
-    if (backdrop == null || Build.VERSION.SDK_INT < 31) return this
+    if (backdrop == null || Build.VERSION.SDK_INT < 31 || !LocalView.current.isHardwareAccelerated) return background(tint, shape)
     return drawBackdrop(
         backdrop = backdrop,
         shape = { shape },
