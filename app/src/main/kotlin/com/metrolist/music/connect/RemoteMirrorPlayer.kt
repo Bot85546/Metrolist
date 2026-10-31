@@ -196,14 +196,16 @@ class RemoteMirrorPlayer(
     override fun getShuffleModeEnabled(): Boolean = remote?.shuffle == true
 
     override fun getNextMediaItemIndex(): Int = remote?.nextQueueIndex?.takeIf { it >= 0 }
-        ?.let { localIndexForSourceIndex(it).takeIf { index -> index != C.INDEX_UNSET }
-            ?: currentMediaItemIndex } ?: C.INDEX_UNSET
+        ?.let(::localIndexForSourceIndex) ?: C.INDEX_UNSET
 
     override fun getPreviousMediaItemIndex(): Int = remote?.previousQueueIndex?.takeIf { it >= 0 }
-        ?.let { localIndexForSourceIndex(it).takeIf { index -> index != C.INDEX_UNSET }
-            ?: currentMediaItemIndex } ?: C.INDEX_UNSET
+        ?.let(::localIndexForSourceIndex) ?: C.INDEX_UNSET
 
-    override fun setPlayWhenReady(playWhenReady: Boolean) = connect.sendCommand(if (playWhenReady) "PLAY" else "PAUSE")
+    override fun setPlayWhenReady(playWhenReady: Boolean) {
+        // MediaSessionService calls setPlayWhenReady(false) while disposing an idle service.
+        // That must never pause music on another device. Deliberate controls call pause().
+        if (playWhenReady) connect.sendCommand("PLAY")
+    }
 
     override fun play() = connect.sendCommand("PLAY")
 

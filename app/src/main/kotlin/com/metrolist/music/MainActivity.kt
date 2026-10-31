@@ -58,6 +58,7 @@ import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -1078,20 +1079,22 @@ class MainActivity : FragmentActivity() {
                                                     contentDescription = stringResource(R.string.stats),
                                                 )
                                             }
-                                            IconButton(onClick = {
-                                                when {
-                                                    deviceConnectUi.connected -> deviceConnectManager.disconnect()
-                                                    deviceConnectUi.trustedDeviceName != null -> deviceConnectManager.connectToTrustedDevice()
-                                                    else -> navController.navigate("settings/device_connect")
-                                                }
-                                            }) {
+                                            IconToggleButton(
+                                                checked = deviceConnectUi.enabled,
+                                                onCheckedChange = { enabled ->
+                                                    deviceConnectManager.setEnabled(enabled)
+                                                    if (enabled && deviceConnectUi.trustedDeviceName == null) {
+                                                        navController.navigate("settings/device_connect")
+                                                    }
+                                                },
+                                            ) {
                                                 Icon(
                                                     painter = painterResource(R.drawable.link),
                                                     contentDescription = stringResource(
-                                                        if (deviceConnectUi.connected) R.string.device_connect_disconnect
+                                                        if (deviceConnectUi.enabled) R.string.device_connect_disconnect
                                                         else R.string.device_connect_connect,
                                                     ),
-                                                    tint = if (deviceConnectUi.connected) MaterialTheme.colorScheme.primary
+                                                    tint = if (deviceConnectUi.enabled) MaterialTheme.colorScheme.primary
                                                         else LocalContentColor.current,
                                                 )
                                             }

@@ -30,6 +30,7 @@ data class DevicePairingRequest(
 data class DeviceConnectUiState(
     val available: Boolean = false,
     val permissionsGranted: Boolean = false,
+    val enabled: Boolean = false,
     val status: String = "Not connected",
     val trustedDeviceName: String? = null,
     val pairingMode: Boolean = false,
@@ -76,6 +77,7 @@ class DeviceConnectManager @Inject constructor(
 
     private val trust = DeviceConnectTrustStore(context)
     private val preferences = context.getSharedPreferences("device_connect_settings", Context.MODE_PRIVATE)
+    private var manuallyDisconnected = preferences.getBoolean("manually_disconnected", false)
     private var trustedPeer = trust.trustedDevice()
     private val transport = DeviceConnectTransportFactory.create(context).also { it.listener = this }
     private val handler = Handler(Looper.getMainLooper())
@@ -84,6 +86,7 @@ class DeviceConnectManager @Inject constructor(
     private val _state = MutableStateFlow(
         DeviceConnectUiState(
             available = transport.available,
+            enabled = trustedPeer != null && !manuallyDisconnected,
             trustedDeviceName = trustedPeer?.name,
         ),
     )
@@ -140,7 +143,6 @@ class DeviceConnectManager @Inject constructor(
         get() = authenticated && syncEnabled && remoteOwnsPlayback
     private var foreground = false
     private var pairingMode = false
-    private var manuallyDisconnected = preferences.getBoolean("manually_disconnected", false)
     // A manual disconnect suspends synchronization but keeps the already-authenticated Nearby
     // channel warm. Reconnecting within the same app process then needs no Bluetooth discovery.
     private var syncEnabled = true
@@ -194,7 +196,7 @@ class DeviceConnectManager @Inject constructor(
                 }
                 revision++
                 updateTransport()
-                sendSnapshot()
+                if (!isRemoteActive) sendSnapshot()
             }
         }
     }
@@ -249,7 +251,7 @@ class DeviceConnectManager @Inject constructor(
         manuallyDisconnected = false
         preferences.edit().putBoolean("manually_disconnected", false).apply()
         discoveryUntilMs = SystemClock.elapsedRealtime() + PAIRING_DISCOVERY_WINDOW_MS
-        _state.value = _state.value.copy(pairingMode = true, status = "Searching for your other Galaxy device…")
+        _state.value = _state.value.copy(enabled = true, pairingMode = true, status = "Searching for your other Galaxy device…")
         // A fresh attempt must rediscover endpoints that Nearby may have cached before Forget.
         if (!connected) transport.stopDiscovery()
         updateTransport()
@@ -272,11 +274,19 @@ class DeviceConnectManager @Inject constructor(
         reconnectAttempts = 0
         reconnectGeneration++
         discoveryUntilMs = SystemClock.elapsedRealtime() + DISCOVERY_WINDOW_MS
-        _state.value = _state.value.copy(status = "Searching for paired device…")
+        _state.value = _state.value.copy(enabled = true, status = "Searching for paired device…")
         updateTransport()
     }
 
     fun connectToTrustedDevice() = searchAgain()
+
+    fun setEnabled(enabled: Boolean) {
+        if (enabled) {
+            if (trustedPeer == null) beginPairing() else searchAgain()
+        } else {
+            disconnect()
+        }
+    }
 
     fun acceptPairing() {
         val request = _state.value.pairingRequest ?: return
@@ -294,6 +304,7 @@ class DeviceConnectManager @Inject constructor(
     fun disconnect() {
         manuallyDisconnected = true
         preferences.edit().putBoolean("manually_disconnected", true).apply()
+        _state.value = _state.value.copy(enabled = false)
         reconnectGeneration++
         if (authenticated) {
             send(DeviceConnectPacket(type = "SYNC_MODE", action = "OFF"))
@@ -382,6 +393,10 @@ class DeviceConnectManager @Inject constructor(
 
     fun refreshSnapshot() {
         if (!authenticated || !syncEnabled) return
+        if (isRemoteActive) {
+            send(DeviceConnectPacket(type = "GET_STATE"))
+            return
+        }
         revision++
         sendSnapshot()
     }
@@ -423,7 +438,7 @@ class DeviceConnectManager @Inject constructor(
         sentQueueRevision = -1L
         queueRetryCount = 0
         acknowledgedQueueRevision = -1L
-        _state.value = _state.value.copy(connected = true, status = "Connected securely")
+        _state.value = _state.value.copy(enabled = true, connected = true, status = "Connected securely")
         send(DeviceConnectPacket(type = "SYNC_MODE",
             action = if (player?.isPlaying == true) "KEEP_SENDER" else "KEEP_RECEIVER"))
         send(DeviceConnectPacket(type = "GET_STATE"))
@@ -619,14 +634,15 @@ class DeviceConnectManager @Inject constructor(
                     "OFF" -> {
                         manuallyDisconnected = true
                         preferences.edit().putBoolean("manually_disconnected", true).apply()
+                        _state.value = _state.value.copy(enabled = false)
                         suspendSync()
                     }
                     "KEEP_SENDER", "KEEP_RECEIVER" -> {
                         manuallyDisconnected = false
                         preferences.edit().putBoolean("manually_disconnected", false).apply()
                         syncEnabled = true
-                        _state.value = _state.value.copy(connected = true, status = "Connected securely")
-                        if (packet.action == "KEEP_SENDER" && player?.isPlaying == true) player?.pause()
+                        _state.value = _state.value.copy(enabled = true, connected = true, status = "Connected securely")
+                        // Reconnecting must never pause an already-playing audio owner.
                         sendSnapshot()
                     }
                 }
@@ -718,6 +734,11 @@ class DeviceConnectManager @Inject constructor(
                 onRemoteOutputReleased?.invoke()
                 target.stop()
                 target.clearMediaItems()
+                val prior = _state.value.remotePlayback
+                remoteOwnsPlayback = true
+                val pendingRemote = handoff.copy(playing = false, updatedAtMs = SystemClock.elapsedRealtime())
+                _state.value = _state.value.copy(remotePlayback = pendingRemote, status = "Switching audio output…")
+                remoteMirrorPlayer?.notifyStateChanged(prior, pendingRemote)
                 send(DeviceConnectPacket(type = "OUTPUT_TAKEOVER_READY", requestId = packet.requestId,
                     state = handoff))
             }
@@ -919,6 +940,7 @@ class DeviceConnectManager @Inject constructor(
         acknowledgedQueueRevision = -1L
         handledCommands.clear()
         _state.value = _state.value.copy(
+            enabled = true,
             connected = true,
             peerName = peer?.name,
             trustedDeviceName = trustedPeer?.name,
@@ -931,7 +953,9 @@ class DeviceConnectManager @Inject constructor(
     }
 
     private fun sendSnapshot() {
-        if (!authenticated || !syncEnabled) return
+        // The idle controller is not an audio owner. Advertising its local player's empty
+        // state can overwrite the real owner's snapshot and destabilize background playback.
+        if (!authenticated || !syncEnabled || isRemoteActive) return
         val target = player ?: return
         val timer = sleepTimerProvider?.invoke() ?: DeviceSleepTimerSnapshot()
         val current = target.currentMediaItem

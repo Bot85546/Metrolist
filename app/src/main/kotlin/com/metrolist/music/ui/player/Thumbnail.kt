@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -72,6 +73,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import coil3.compose.AsyncImage
+import coil3.imageLoader
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import com.metrolist.music.LocalListenTogetherManager
@@ -210,6 +212,7 @@ fun Thumbnail(
     val queueTitle by playerConnection.queueTitle.collectAsStateWithLifecycle()
     val canSkipPrevious by playerConnection.canSkipPrevious.collectAsStateWithLifecycle()
     val canSkipNext by playerConnection.canSkipNext.collectAsStateWithLifecycle()
+    val queueWindows by playerConnection.queueWindows.collectAsState()
 
     // Preferences - computed once
     // Disable swipe for Listen Together guests
@@ -232,6 +235,7 @@ fun Thumbnail(
     val mediaItemsData by remember(
         playerConnection.player.currentMediaItemIndex,
         playerConnection.player.shuffleModeEnabled,
+        queueWindows,
         swipeThumbnail,
         mediaMetadata
     ) {
@@ -242,6 +246,27 @@ fun Thumbnail(
     
     val mediaItems = mediaItemsData.items
     val currentMediaIndex = mediaItemsData.currentIndex
+
+    val nextArtwork = mediaItems.getOrNull(currentMediaIndex + 1)
+        ?.mediaMetadata?.artworkUri?.toString()?.let { playerArtworkUrl(it, false) }
+    val isRemoteController = LocalDeviceConnectManager.current?.isRemoteActive == true
+    // Warm only the next small cover on the remote controller. No extra image work is
+    // needed on the device actually playing audio, and the full-size cover stays on demand.
+    LaunchedEffect(nextArtwork, isRemoteController) {
+        if (isRemoteController && !nextArtwork.isNullOrBlank()) {
+            runCatching {
+                context.imageLoader.execute(
+                    ImageRequest.Builder(context)
+                        .data(nextArtwork)
+                        .size(200, 200)
+                        .memoryCachePolicy(CachePolicy.ENABLED)
+                        .diskCachePolicy(CachePolicy.ENABLED)
+                        .networkCachePolicy(CachePolicy.ENABLED)
+                        .build()
+                )
+            }
+        }
+    }
 
     // Snap behavior - created once per grid state
     val thumbnailSnapLayoutInfoProvider = remember(thumbnailLazyGridState) {
@@ -400,7 +425,7 @@ fun Thumbnail(
                                 // A track can occur in more than one adjacent queue position.
                                 "thumbnail_$index:${item.mediaId}"
                             }
-                        ) { _, item ->
+                        ) { index, item ->
                             ThumbnailItem(
                                 item = item,
                                 dimensions = dimensions,
@@ -413,7 +438,7 @@ fun Thumbnail(
                                 context = context,
                                 isLandscape = isLandscape,
                                 isListenTogetherGuest = isListenTogetherGuest,
-                                currentMediaId = mediaMetadata?.id,
+                                isCurrentSong = index == currentMediaIndex,
                                 currentMediaThumbnail = mediaMetadata?.thumbnailUrl
                             )
                         }
@@ -533,7 +558,7 @@ private fun ThumbnailItem(
     context: android.content.Context,
     isLandscape: Boolean = false,
     isListenTogetherGuest: Boolean = false,
-    currentMediaId: String? = null,
+    isCurrentSong: Boolean = false,
     currentMediaThumbnail: String? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -598,7 +623,6 @@ private fun ThumbnailItem(
             if (hidePlayerThumbnail) {
                 HiddenThumbnailPlaceholder(textBackgroundColor = textBackgroundColor)
             } else {
-                val isCurrentSong = item.mediaId == currentMediaId
                 val artworkUri = if (isCurrentSong && !currentMediaThumbnail.isNullOrBlank()) {
                     currentMediaThumbnail
                 } else {
@@ -606,10 +630,12 @@ private fun ThumbnailItem(
                 }
                 val artworkUriToUse = playerArtworkUrl(artworkUri, isCurrentSong)
 
-                ThumbnailImage(
-                    artworkUri = artworkUriToUse,
-                    cropArtwork = cropAlbumArt
-                )
+                key(artworkUriToUse) {
+                    ThumbnailImage(
+                        artworkUri = artworkUriToUse,
+                        cropArtwork = cropAlbumArt
+                    )
+                }
             }
             
             // Cast button at top-right corner of thumbnail
