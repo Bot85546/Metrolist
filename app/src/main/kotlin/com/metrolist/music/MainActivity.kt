@@ -5,6 +5,10 @@
 
 package com.metrolist.music
 
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.metrolist.music.ui.theme.LocalMetrolittBackdrop
+
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.PendingIntent
@@ -1033,7 +1037,9 @@ class MainActivity : FragmentActivity() {
                 val baseBg = if (pureBlack) Color.Black else MaterialTheme.colorScheme.surfaceContainer
                 val artistNameAliases by ArtistNameAliases.aliases.collectAsStateWithLifecycle()
 
+                val metrolittBackdrop = rememberLayerBackdrop()
                 CompositionLocalProvider(
+                    LocalMetrolittBackdrop provides metrolittBackdrop,
                     LocalDatabase provides database,
                     LocalNavController provides navController,
                     LocalContentColor provides if (pureBlack) Color.White else contentColorFor(MaterialTheme.colorScheme.surface),
@@ -1341,7 +1347,7 @@ class MainActivity : FragmentActivity() {
                                     onHomeLongHold = { showAccountDialog = true },
                                 )
                             }
-                            Box(Modifier.weight(1f)) {
+                            Box(Modifier.weight(1f).layerBackdrop(metrolittBackdrop)) {
                                 // NavHost with animations (Material 3 Expressive style)
                                 NavHost(
                                     navController = navController,

@@ -5,6 +5,7 @@
 
 package com.metrolist.music.ui.component
 
+import com.metrolist.music.ui.theme.metrolittGlass
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -154,8 +155,9 @@ fun AppNavigationBar(
         modifier = modifier
             .padding(horizontal = 12.dp, vertical = 4.dp)
             .clip(navigationShape)
+            .metrolittGlass(navigationShape, containerColor)
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f), navigationShape),
-        containerColor = containerColor,
+        containerColor = if (android.os.Build.VERSION.SDK_INT >= 31) Color.Transparent else containerColor,
         contentColor = contentColor
     ) {
         navigationItems.forEach { screen ->
