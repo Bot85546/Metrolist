@@ -1915,8 +1915,9 @@ fun BottomSheetPlayer(
             }
         }
 
-        when (LocalConfiguration.current.orientation) {
-            Configuration.ORIENTATION_LANDSCAPE -> {
+        val playerWindow = LocalConfiguration.current
+        when {
+            playerWindow.screenWidthDp >= 600 && playerWindow.screenWidthDp > playerWindow.screenHeightDp -> {
                 // Calculate vertical padding like OuterTune
                 val density = LocalDensity.current
                 val verticalPadding =
