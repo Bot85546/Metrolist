@@ -141,6 +141,7 @@ class DeviceConnectProtocolTest {
         listOf(
             DeviceConnectPacket(type = "GET_QUEUE"),
             DeviceConnectPacket(type = "MIRROR_QUEUE_ACK", queueRevision = 4),
+            DeviceConnectPacket(type = "OUTPUT_TAKEOVER_OFFER", requestId = "offer-1234567890-abcd"),
             DeviceConnectPacket(type = "OUTPUT_TAKEOVER_REQUEST", requestId = "request-1234567890",
                 queueRevision = 4),
             DeviceConnectPacket(type = "OUTPUT_TAKEOVER_READY", requestId = "request-1234567890",

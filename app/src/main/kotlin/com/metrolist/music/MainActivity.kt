@@ -58,12 +58,12 @@ import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -87,6 +87,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -1079,7 +1081,8 @@ class MainActivity : FragmentActivity() {
                                                     contentDescription = stringResource(R.string.stats),
                                                 )
                                             }
-                                            IconToggleButton(
+                                            val connectSwitchDescription = stringResource(R.string.device_connect)
+                                            Switch(
                                                 checked = deviceConnectUi.enabled,
                                                 onCheckedChange = { enabled ->
                                                     deviceConnectManager.setEnabled(enabled)
@@ -1087,17 +1090,17 @@ class MainActivity : FragmentActivity() {
                                                         navController.navigate("settings/device_connect")
                                                     }
                                                 },
-                                            ) {
-                                                Icon(
-                                                    painter = painterResource(R.drawable.link),
-                                                    contentDescription = stringResource(
-                                                        if (deviceConnectUi.enabled) R.string.device_connect_disconnect
-                                                        else R.string.device_connect_connect,
-                                                    ),
-                                                    tint = if (deviceConnectUi.enabled) MaterialTheme.colorScheme.primary
-                                                        else LocalContentColor.current,
-                                                )
-                                            }
+                                                modifier = Modifier
+                                                    .padding(horizontal = 2.dp)
+                                                    .semantics { contentDescription = connectSwitchDescription },
+                                                thumbContent = {
+                                                    Icon(
+                                                        painter = painterResource(R.drawable.link),
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(16.dp),
+                                                    )
+                                                },
+                                            )
                                             IconButton(onClick = { showAccountDialog = true }) {
                                                 BadgedBox(badge = {
                                                     if (latestVersionName != BuildConfig.BASE_VERSION_NAME) {

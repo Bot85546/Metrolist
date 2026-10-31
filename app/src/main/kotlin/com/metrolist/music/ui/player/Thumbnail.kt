@@ -482,6 +482,8 @@ private fun ThumbnailHeader(
     val remoteName = if (connectManager?.isRemoteActive == true) {
         connectState.peerName ?: connectState.trustedDeviceName
     } else null
+    val peerName = connectState.peerName ?: connectState.trustedDeviceName
+    val canSendOutputToPeer = connectManager?.canSwitchOutputToPeer == true && peerName != null
     val listenTogetherManager = LocalListenTogetherManager.current
     val listenTogetherRoleState = listenTogetherManager?.role?.collectAsStateWithLifecycle(initialValue = RoomRole.NONE)
     val isListenTogetherGuest = listenTogetherRoleState?.value == RoomRole.GUEST
@@ -533,6 +535,14 @@ private fun ThumbnailHeader(
                                 R.string.device_connect_switch_output_here
                             else R.string.device_connect_syncing_queue
                         ),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = textColor,
+                    )
+                }
+            } else if (canSendOutputToPeer && peerName != null) {
+                TextButton(onClick = { connectManager?.requestOutputSwitchToPeer() }) {
+                    Text(
+                        text = stringResource(R.string.device_connect_switch_output_other, peerName),
                         style = MaterialTheme.typography.labelMedium,
                         color = textColor,
                     )

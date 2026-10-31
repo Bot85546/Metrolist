@@ -137,6 +137,7 @@ class DeviceConnectManager @Inject constructor(
     private var pendingTakeoverId: String? = null
     private var pendingTakeoverQueue: List<DeviceTrack>? = null
     private var pendingTakeoverQueueRevision = -1L
+    private var peerRequestedSwitchUntilMs = 0L
     private var lastLocalSnapshot: DevicePlaybackState? = null
 
     val isRemoteActive: Boolean
@@ -366,6 +367,30 @@ class DeviceConnectManager @Inject constructor(
                 snapshot.queue.all { it.sourceIndex in 0 until snapshot.queueSize }
         } == true
 
+    val canSwitchOutputToPeer: Boolean
+        get() = authenticated && syncEnabled && _state.value.connected && !isRemoteActive &&
+            player?.currentMediaItem != null && (player?.mediaItemCount ?: 0) in 1..1500
+
+    fun requestOutputSwitchToPeer(): Boolean {
+        if (!canSwitchOutputToPeer) return false
+        revision++
+        sendSnapshot()
+        send(DeviceConnectPacket(type = "OUTPUT_TAKEOVER_OFFER", requestId = UUID.randomUUID().toString()))
+        return true
+    }
+
+    private fun fulfillPeerOutputSwitchIfReady() {
+        if (peerRequestedSwitchUntilMs == 0L) return
+        if (SystemClock.elapsedRealtime() > peerRequestedSwitchUntilMs) {
+            peerRequestedSwitchUntilMs = 0L
+            return
+        }
+        if (canSwitchOutput && pendingTakeoverId == null) {
+            peerRequestedSwitchUntilMs = 0L
+            requestOutputSwitch()
+        }
+    }
+
     /** Release the current audio owner only after the controller has its full ordered queue. */
     fun requestOutputSwitch(): Boolean {
         if (!canSwitchOutput || pendingTakeoverId != null) {
@@ -414,6 +439,7 @@ class DeviceConnectManager @Inject constructor(
         pendingTakeoverId = null
         pendingTakeoverQueue = null
         pendingTakeoverQueueRevision = -1L
+        peerRequestedSwitchUntilMs = 0L
         latestRemoteRevision = -1L
         _state.value = _state.value.copy(connected = false, remotePlayback = null,
             status = "Disconnected (ready to reconnect)")
@@ -647,11 +673,7 @@ class DeviceConnectManager @Inject constructor(
                     }
                 }
             }
-            "GET_STATE" -> if (authenticated && syncEnabled) {
-                sentQueueRevision = -1L
-                queueRetryCount = 0
-                sendSnapshot()
-            }
+            "GET_STATE" -> if (authenticated && syncEnabled) sendSnapshot()
             "GET_QUEUE" -> if (authenticated && syncEnabled) {
                 sentQueueRevision = -1L
                 queueRetryCount = 0
@@ -682,6 +704,7 @@ class DeviceConnectManager @Inject constructor(
                     queueStartIndex = if (fullQueue != null || snapshot.track == null) 0 else snapshot.queueStartIndex,
                 ))
                 remoteMirrorPlayer?.notifyStateChanged(oldSnapshot, _state.value.remotePlayback)
+                fulfillPeerOutputSwitchIfReady()
             }
             "MIRROR_QUEUE_BEGIN" -> {
                 if (!authenticated || !syncEnabled || packet.transferId.length !in 16..64 ||
@@ -716,6 +739,17 @@ class DeviceConnectManager @Inject constructor(
                 if (!authenticated || !syncEnabled || packet.queueRevision != localQueueRevision) return
                 acknowledgedQueueRevision = packet.queueRevision
                 queueRetryGeneration++
+            }
+            "OUTPUT_TAKEOVER_OFFER" -> {
+                if (!authenticated || !syncEnabled || packet.requestId.length !in 16..64 ||
+                    !handledCommands.add(packet.requestId)
+                ) return
+                peerRequestedSwitchUntilMs = SystemClock.elapsedRealtime() + HANDSHAKE_TIMEOUT_MS
+                fulfillPeerOutputSwitchIfReady()
+                if (peerRequestedSwitchUntilMs != 0L) {
+                    send(DeviceConnectPacket(type = "GET_QUEUE"))
+                    send(DeviceConnectPacket(type = "GET_STATE"))
+                }
             }
             "OUTPUT_TAKEOVER_REQUEST" -> {
                 if (!authenticated || !syncEnabled || isRemoteActive ||
@@ -920,6 +954,7 @@ class DeviceConnectManager @Inject constructor(
         val updated = old.copy(queue = fullQueue, queueStartIndex = 0)
         _state.value = _state.value.copy(remotePlayback = updated)
         remoteMirrorPlayer?.notifyStateChanged(old, updated)
+        fulfillPeerOutputSwitchIfReady()
     }
 
     private fun finishAuthentication() {
@@ -1134,6 +1169,7 @@ class DeviceConnectManager @Inject constructor(
         pendingTakeoverId = null
         pendingTakeoverQueue = null
         pendingTakeoverQueueRevision = -1L
+        peerRequestedSwitchUntilMs = 0L
         _state.value = _state.value.copy(
             connected = false, peerName = null, remotePlayback = null, pairingRequest = null,
         )
