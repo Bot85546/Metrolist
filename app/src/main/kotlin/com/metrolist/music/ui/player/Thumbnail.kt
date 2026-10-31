@@ -92,6 +92,7 @@ import com.metrolist.music.ui.component.CastButton
 import com.metrolist.music.utils.rememberEnumPreference
 import com.metrolist.music.utils.rememberPreference
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 
 /**
  * Pre-calculated thumbnail dimensions to avoid repeated calculations during recomposition.
