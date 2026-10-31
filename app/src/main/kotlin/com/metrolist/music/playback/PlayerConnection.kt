@@ -471,7 +471,7 @@ class PlayerConnection(
                 if (player.playbackState == Player.STATE_IDLE) {
                     player.prepare()
                 }
-                player.playWhenReady = true
+                player.play()
             }
         } catch (e: Exception) {
             Timber.tag(TAG).e(e, "Error in play")
@@ -487,7 +487,7 @@ class PlayerConnection(
             if (castHandler?.isCasting?.value == true) {
                 castHandler.pause()
             } else {
-                player.playWhenReady = false
+                player.pause()
             }
         } catch (e: Exception) {
             Timber.tag(TAG).e(e, "Error in pause")

@@ -64,6 +64,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -1093,6 +1094,16 @@ class MainActivity : FragmentActivity() {
                                                 modifier = Modifier
                                                     .padding(horizontal = 2.dp)
                                                     .semantics { contentDescription = connectSwitchDescription },
+                                                colors = SwitchDefaults.colors(
+                                                    checkedThumbColor = Color.White,
+                                                    checkedTrackColor = Color(0xFF3B82F6),
+                                                    checkedBorderColor = Color.Transparent,
+                                                    checkedIconColor = Color(0xFF3B82F6),
+                                                    uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                                                    uncheckedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                                                    uncheckedIconColor = MaterialTheme.colorScheme.surface,
+                                                ),
                                                 thumbContent = {
                                                     Icon(
                                                         painter = painterResource(R.drawable.link),

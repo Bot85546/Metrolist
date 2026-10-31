@@ -530,13 +530,9 @@ private fun ThumbnailHeader(
                     enabled = connectManager?.canSwitchOutput == true,
                 ) {
                     Text(
-                        text = stringResource(
-                            if (connectManager?.canSwitchOutput == true)
-                                R.string.device_connect_switch_output_here
-                            else R.string.device_connect_syncing_queue
-                        ),
+                        text = stringResource(R.string.device_connect_switch_output_here),
                         style = MaterialTheme.typography.labelMedium,
-                        color = textColor,
+                        color = textColor.copy(alpha = if (connectManager?.canSwitchOutput == true) 1f else 0.55f),
                     )
                 }
             } else if (canSendOutputToPeer && peerName != null) {
