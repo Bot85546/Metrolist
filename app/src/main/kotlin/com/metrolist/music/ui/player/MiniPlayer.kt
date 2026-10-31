@@ -7,6 +7,8 @@
 
 package com.metrolist.music.ui.player
 
+import com.metrolist.music.ui.theme.metrolittGlass
+
 import android.content.res.Configuration
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
@@ -380,7 +382,8 @@ private fun NewMiniPlayer(
                     .height(64.dp)
                     .offset { IntOffset(offsetXAnimatable.value.roundToInt(), 0) }
                     .clip(RoundedCornerShape(22.dp))
-                    .background(color = backgroundColor)
+                    .metrolittGlass(RoundedCornerShape(22.dp), backgroundColor)
+                    .background(color = backgroundColor.copy(alpha = if (android.os.Build.VERSION.SDK_INT >= 31) 0.32f else 1f))
                     .border(1.dp, outlineColor.copy(alpha = 0.18f), RoundedCornerShape(22.dp))
                     .clickable(
                         interactionSource = interactionSource,
@@ -418,7 +421,7 @@ private fun NewMiniPlayer(
                         Modifier
                             .fillMaxSize()
                             .background(
-                                Brush.horizontalGradient(colors)
+                                Brush.horizontalGradient(colors.map { it.copy(alpha = if (android.os.Build.VERSION.SDK_INT >= 31) 0.56f else 1f) })
                             )
                             .background(Color.Black.copy(alpha = 0.15f)),
                     )
