@@ -257,8 +257,8 @@ class PlayerConnection(
                     shuffleModeEnabled.value = snapshot.shuffle
                     currentMediaItemIndex.value = mirror!!.currentMediaItemIndex
                     queueTitle.value = snapshot.queueTitle
-                    canSkipPrevious.value = snapshot.previousQueueIndex >= 0
-                    canSkipNext.value = snapshot.nextQueueIndex >= 0
+                    canSkipPrevious.value = snapshot.previousQueueIndex >= 0 || snapshot.queueSize > 1
+                    canSkipNext.value = snapshot.nextQueueIndex >= 0 || snapshot.queueSize > 1
                     isMuted.value = snapshot.muted
                 } else {
                     isMuted.value = service.isMuted.value
@@ -759,6 +759,14 @@ class PlayerConnection(
     }
 
     private fun updateCanSkipPreviousAndNext() {
+        if (deviceConnectManager.isRemoteActive) {
+            val snapshot = deviceConnectManager.state.value.remotePlayback
+            canSkipPrevious.value = snapshot?.track != null &&
+                (snapshot.previousQueueIndex >= 0 || snapshot.queueSize > 1)
+            canSkipNext.value = snapshot?.track != null &&
+                (snapshot.nextQueueIndex >= 0 || snapshot.queueSize > 1)
+            return
+        }
         if (!player.currentTimeline.isEmpty) {
             val window =
                 player.currentTimeline.getWindow(player.currentMediaItemIndex, Timeline.Window())

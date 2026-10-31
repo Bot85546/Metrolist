@@ -10,6 +10,8 @@ data class DeviceTrack(
     val artist: String,
     val artwork: String? = null,
     val durationSeconds: Int = 0,
+    // Index on the audio-producing device; the transmitted list is in playback order.
+    val sourceIndex: Int = -1,
 )
 
 @Serializable

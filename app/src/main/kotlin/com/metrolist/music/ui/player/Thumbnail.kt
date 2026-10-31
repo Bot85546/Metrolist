@@ -12,6 +12,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
@@ -45,6 +47,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -251,16 +255,29 @@ fun Thumbnail(
 
     // Current item tracking - derived state for efficiency
     val currentItem by remember { derivedStateOf { thumbnailLazyGridState.firstVisibleItemIndex } }
-    val itemScrollOffset by remember { derivedStateOf { thumbnailLazyGridState.firstVisibleItemScrollOffset } }
+    val isDragged by thumbnailLazyGridState.interactionSource.collectIsDraggedAsState()
+    val currentMediaIndexState by rememberUpdatedState(currentMediaIndex)
+    val canSkipNextState by rememberUpdatedState(canSkipNext)
+    val canSkipPreviousState by rememberUpdatedState(canSkipPrevious)
 
-    // Handle swipe to change song
-    LaunchedEffect(itemScrollOffset) {
-        if (!thumbnailLazyGridState.isScrollInProgress || !swipeThumbnail || itemScrollOffset != 0 || currentMediaIndex < 0) return@LaunchedEffect
-
-        if (currentItem > currentMediaIndex && canSkipNext) {
-            playerConnection.player.seekToNext()
-        } else if (currentItem < currentMediaIndex && canSkipPrevious) {
-            playerConnection.player.seekToPreviousMediaItem()
+    // Dispatch only after an actual drag settles. The old offset-based callback often ran
+    // while the scroll was still moving and missed the final snap on remote controllers.
+    LaunchedEffect(thumbnailLazyGridState, swipeThumbnail) {
+        var userSwiped = false
+        snapshotFlow {
+            Triple(isDragged, thumbnailLazyGridState.isScrollInProgress,
+                thumbnailLazyGridState.firstVisibleItemIndex)
+        }.collect { (dragging, scrolling, selectedIndex) ->
+            if (dragging) userSwiped = true
+            if (userSwiped && !scrolling) {
+                userSwiped = false
+                if (swipeThumbnail && currentMediaIndexState >= 0) {
+                    when {
+                        selectedIndex > currentMediaIndexState && canSkipNextState -> playerConnection.seekToNext()
+                        selectedIndex < currentMediaIndexState && canSkipPreviousState -> playerConnection.seekToPrevious()
+                    }
+                }
+            }
         }
     }
 
@@ -477,6 +494,22 @@ private fun ThumbnailHeader(
                     maxLines = 1,
                     modifier = Modifier.basicMarquee()
                 )
+            }
+            if (remoteName != null) {
+                TextButton(
+                    onClick = { connectManager?.requestOutputSwitch() },
+                    enabled = connectManager?.canSwitchOutput == true,
+                ) {
+                    Text(
+                        text = stringResource(
+                            if (connectManager?.canSwitchOutput == true)
+                                R.string.device_connect_switch_output_here
+                            else R.string.device_connect_syncing_queue
+                        ),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = textColor,
+                    )
+                }
             }
         }
     }

@@ -855,6 +855,7 @@ class MainActivity : FragmentActivity() {
                 val activePlayerConnection = if (playerReady) playerConnection else null
                 val deviceConnectUi by deviceConnectManager.state.collectAsStateWithLifecycle()
                 val isRemoteMirror = deviceConnectManager.isRemoteActive
+                val activeTrackId = activePlayerConnection?.mediaMetadata?.collectAsStateWithLifecycle()?.value?.id
 
                 val playerAwareWindowInsets =
                     remember(
@@ -919,7 +920,8 @@ class MainActivity : FragmentActivity() {
                     }
                 }
 
-                LaunchedEffect(activePlayerConnection, isRemoteMirror, deviceConnectUi.remotePlayback?.track?.id) {
+                LaunchedEffect(activePlayerConnection, isRemoteMirror, activeTrackId,
+                    deviceConnectUi.remotePlayback?.track?.id) {
                     if (isRemoteMirror) {
                         if (deviceConnectUi.remotePlayback?.track == null) {
                             if (!playerBottomSheetState.isDismissed) playerBottomSheetState.dismiss()

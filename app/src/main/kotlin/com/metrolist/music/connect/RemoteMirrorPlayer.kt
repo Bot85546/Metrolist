@@ -52,10 +52,11 @@ class RemoteMirrorPlayer(
         if (snapshot !== cachedState) {
             cachedState = snapshot
             val entries = snapshot?.queue.orEmpty().ifEmpty { listOfNotNull(snapshot?.track) }
+            val orderedIndex = entries.indexOfFirst { it.sourceIndex == snapshot?.queueIndex }
             cachedTimeline = if (entries.isEmpty()) Timeline.EMPTY else RemoteQueueTimeline(
                 entries,
                 snapshot?.durationMs ?: 0L,
-                if (snapshot?.queue.isNullOrEmpty()) 0 else
+                if (orderedIndex >= 0) orderedIndex else
                     ((snapshot?.queueIndex ?: 0) - (snapshot?.queueStartIndex ?: 0)).coerceIn(0, entries.lastIndex),
             )
         }
@@ -112,10 +113,26 @@ class RemoteMirrorPlayer(
 
     override fun getMediaItemCount(): Int = timeline().windowCount
 
+    private fun localIndexForSourceIndex(sourceIndex: Int): Int {
+        val snapshot = remote ?: return C.INDEX_UNSET
+        if (sourceIndex < 0) return C.INDEX_UNSET
+        val orderedIndex = snapshot.queue.indexOfFirst { it.sourceIndex == sourceIndex }
+        if (orderedIndex >= 0) return orderedIndex
+        val fallback = sourceIndex - snapshot.queueStartIndex
+        return fallback.takeIf { it in 0 until mediaItemCount } ?: C.INDEX_UNSET
+    }
+
+    private fun sourceIndexForLocalIndex(localIndex: Int): Int {
+        val snapshot = remote ?: return C.INDEX_UNSET
+        return snapshot.queue.getOrNull(localIndex)?.sourceIndex?.takeIf { it >= 0 }
+            ?: (snapshot.queueStartIndex + localIndex)
+    }
+
     override fun getCurrentMediaItemIndex(): Int {
         val snapshot = remote ?: return 0
-        return if (snapshot.queue.isEmpty()) 0
-        else (snapshot.queueIndex - snapshot.queueStartIndex).coerceIn(0, (mediaItemCount - 1).coerceAtLeast(0))
+        return if (snapshot.queue.isEmpty()) 0 else
+            localIndexForSourceIndex(snapshot.queueIndex).takeIf { it != C.INDEX_UNSET }
+                ?: 0
     }
 
     // One period per remote window. ForwardingPlayer's default reads the *local* player period,
@@ -179,11 +196,11 @@ class RemoteMirrorPlayer(
     override fun getShuffleModeEnabled(): Boolean = remote?.shuffle == true
 
     override fun getNextMediaItemIndex(): Int = remote?.nextQueueIndex?.takeIf { it >= 0 }
-        ?.let { (it - (remote?.queueStartIndex ?: 0)).takeIf { index -> index in 0 until mediaItemCount }
+        ?.let { localIndexForSourceIndex(it).takeIf { index -> index != C.INDEX_UNSET }
             ?: currentMediaItemIndex } ?: C.INDEX_UNSET
 
     override fun getPreviousMediaItemIndex(): Int = remote?.previousQueueIndex?.takeIf { it >= 0 }
-        ?.let { (it - (remote?.queueStartIndex ?: 0)).takeIf { index -> index in 0 until mediaItemCount }
+        ?.let { localIndexForSourceIndex(it).takeIf { index -> index != C.INDEX_UNSET }
             ?: currentMediaItemIndex } ?: C.INDEX_UNSET
 
     override fun setPlayWhenReady(playWhenReady: Boolean) = connect.sendCommand(if (playWhenReady) "PLAY" else "PAUSE")
@@ -201,8 +218,8 @@ class RemoteMirrorPlayer(
     override fun seekForward() = seekTo((currentPosition + seekForwardIncrement).coerceAtMost(duration))
 
     override fun seekTo(mediaItemIndex: Int, positionMs: Long) {
-        val snapshot = remote ?: return
-        val actualIndex = if (snapshot.queue.isEmpty()) snapshot.queueIndex else snapshot.queueStartIndex + mediaItemIndex
+        val actualIndex = sourceIndexForLocalIndex(mediaItemIndex)
+        if (actualIndex == C.INDEX_UNSET) return
         connect.sendCommand("SEEK_QUEUE", actualIndex.toLong())
         if (positionMs > 0) connect.sendCommand("SEEK", positionMs)
     }
@@ -263,8 +280,8 @@ class RemoteMirrorPlayer(
     override fun replaceMediaItems(fromIndex: Int, toIndex: Int, mediaItems: List<MediaItem>) = Unit
 
     override fun removeMediaItem(index: Int) {
-        val snapshot = remote ?: return
-        connect.sendCommand("REMOVE_QUEUE", (snapshot.queueStartIndex + index).toLong())
+        val actualIndex = sourceIndexForLocalIndex(index)
+        if (actualIndex != C.INDEX_UNSET) connect.sendCommand("REMOVE_QUEUE", actualIndex.toLong())
     }
 
     override fun addMediaItem(mediaItem: MediaItem) = addMediaItems(listOf(mediaItem))
@@ -272,9 +289,9 @@ class RemoteMirrorPlayer(
     override fun addMediaItem(index: Int, mediaItem: MediaItem) = addMediaItems(index, listOf(mediaItem))
 
     override fun moveMediaItem(currentIndex: Int, newIndex: Int) {
-        val start = remote?.queueStartIndex ?: return
-        val from = (start + currentIndex).toLong()
-        val to = (start + newIndex).toLong()
+        val from = sourceIndexForLocalIndex(currentIndex).toLong()
+        val to = sourceIndexForLocalIndex(newIndex).toLong()
+        if (from < 0 || to < 0) return
         connect.sendCommand("MOVE_QUEUE", (from shl 32) or (to and 0xffffffffL))
     }
 }

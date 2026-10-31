@@ -632,6 +632,36 @@ class MusicService :
             currentSong.value?.song?.let { if (it.isEpisode) it.inLibrary != null else it.liked }
         }
         deviceConnectManager.onRemoteStopCommand = { clearAutomix() }
+        deviceConnectManager.onRemoteOutputReleased = {
+            clearAutomix()
+            sleepTimer?.clear()
+        }
+        deviceConnectManager.onRemoteOutputHandoff = { handoff, orderedTracks ->
+            val start = orderedTracks.indexOfFirst { it.sourceIndex == handoff.queueIndex }
+            if (start >= 0 && orderedTracks.isNotEmpty()) {
+                clearAutomix()
+                val mediaItems = orderedTracks.map { it.asMediaItem(0L) }
+                player.setMediaItems(mediaItems, start, handoff.positionMs.coerceAtLeast(0L))
+                queueTitle = handoff.queueTitle
+                player.repeatMode = handoff.repeatMode
+                player.shuffleModeEnabled = handoff.shuffle
+                if (handoff.shuffle) {
+                    // The incoming playlist is already ordered as heard. Keep that order
+                    // while retaining the visible shuffle state on the new audio owner.
+                    player.setShuffleOrder(DefaultShuffleOrder(IntArray(mediaItems.size) { it }, System.currentTimeMillis()))
+                }
+                player.playbackParameters = androidx.media3.common.PlaybackParameters(handoff.speed, handoff.pitch)
+                sleepTimer?.clear()
+                if (handoff.sleepTimerAfterSong) {
+                    sleepTimer?.start(-1, handoff.sleepTimerStopAfterSong, handoff.sleepTimerFadeOut)
+                } else if (handoff.sleepTimerRemainingMs > 0L) {
+                    val minutes = ((handoff.sleepTimerRemainingMs + 59_999L) / 60_000L).toInt().coerceIn(1, 120)
+                    sleepTimer?.start(minutes, handoff.sleepTimerStopAfterSong, handoff.sleepTimerFadeOut)
+                }
+                player.prepare()
+                if (handoff.playing) player.play()
+            }
+        }
         Timber.tag(TAG).d("Player successfully initialized")
 
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -3921,6 +3951,8 @@ class MusicService :
         deviceConnectManager.volumeProvider = null
         deviceConnectManager.mutedProvider = null
         deviceConnectManager.onRemoteSleepTimerCommand = null
+        deviceConnectManager.onRemoteOutputReleased = null
+        deviceConnectManager.onRemoteOutputHandoff = null
         deviceConnectManager.onRemoteVolumeCommand = null
         deviceConnectManager.onRemoteMuteCommand = null
         isRunning = false
