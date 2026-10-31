@@ -6,6 +6,8 @@ import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.AdvertisingOptions
+import com.google.android.gms.nearby.connection.ConnectionOptions
+import com.google.android.gms.nearby.connection.ConnectionType
 import com.google.android.gms.nearby.connection.ConnectionInfo
 import com.google.android.gms.nearby.connection.ConnectionLifecycleCallback
 import com.google.android.gms.nearby.connection.ConnectionResolution
@@ -73,7 +75,10 @@ private class NearbyDeviceConnectTransport(context: Context) : DeviceConnectTran
             localName,
             serviceId,
             connectionCallback,
-            AdvertisingOptions.Builder().setStrategy(strategy).build(),
+            AdvertisingOptions.Builder()
+                .setStrategy(strategy)
+                .setConnectionType(ConnectionType.NON_DISRUPTIVE)
+                .build(),
         ).addOnFailureListener {
             advertising = false
             listener?.failed("Nearby advertising unavailable: ${it.message}")
@@ -108,7 +113,14 @@ private class NearbyDeviceConnectTransport(context: Context) : DeviceConnectTran
     }
 
     override fun connect(endpointId: String, localName: String) {
-        client.requestConnection(localName, endpointId, connectionCallback)
+        client.requestConnection(
+            localName,
+            endpointId,
+            connectionCallback,
+            ConnectionOptions.Builder()
+                .setConnectionType(ConnectionType.NON_DISRUPTIVE)
+                .build(),
+        )
             .addOnFailureListener { listener?.failed("Nearby connect: ${it.message}") }
     }
 

@@ -28,7 +28,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -394,12 +394,13 @@ fun Thumbnail(
                             Modifier.fillMaxSize()
                         }
                     ) {
-                        items(
+                        itemsIndexed(
                             items = mediaItems,
-                            key = { item -> 
-                                item.mediaId.ifEmpty { "unknown_${item.hashCode()}" }
+                            key = { index, item ->
+                                // A track can occur in more than one adjacent queue position.
+                                "thumbnail_$index:${item.mediaId}"
                             }
-                        ) { item ->
+                        ) { _, item ->
                             ThumbnailItem(
                                 item = item,
                                 dimensions = dimensions,
