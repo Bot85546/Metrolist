@@ -125,6 +125,13 @@ class DeviceConnectProtocolTest {
     }
 
     @Test
+    fun olderPairedVersionCanOmitPhysicalQueueIndices() {
+        val oldPacket = """{"type":"MIRROR_QUEUE_BATCH","queueItems":[{"id":"song", "title":"Song", "artist":"Artist"}]}"""
+        val decoded = DeviceConnectProtocol.decode(oldPacket.encodeToByteArray())!!
+        assertEquals(-1, decoded.queueItems.single().sourceIndex)
+    }
+
+    @Test
     fun reliableQueueAndPlaybackHandoffPacketsRoundTrip() {
         val playback = DevicePlaybackState(
             revision = 8, queueRevision = 4, track = DeviceTrack("track", "Song", "Artist"),
