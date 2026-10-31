@@ -32,6 +32,8 @@ import com.metrolist.music.extensions.metadata
 import com.metrolist.music.extensions.togglePlayPause
 import com.metrolist.music.extensions.withUpdatedMetadata
 import com.metrolist.music.models.toMediaMetadata
+import com.metrolist.music.connect.DeviceConnectManager
+import com.metrolist.music.models.MediaMetadata
 import com.metrolist.music.playback.MusicService.MusicBinder
 import com.metrolist.music.playback.queues.Queue
 import com.metrolist.music.utils.dataStore
@@ -56,7 +58,8 @@ class PlayerConnection(
     context: Context,
     binder: MusicBinder,
     val database: MusicDatabase,
-    scope: CoroutineScope,
+    private val scope: CoroutineScope,
+    private val deviceConnectManager: DeviceConnectManager,
 ) : Player.Listener {
     private companion object {
         private const val TAG = "PlayerConnection"
@@ -91,8 +94,13 @@ class PlayerConnection(
             null
         }
 
-    val player: ExoPlayer
+    val localPlayer: ExoPlayer
         get() = getPlayerSafe()
+
+    val player: Player
+        get() = if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.remoteMirrorPlayer ?: getPlayerSafe()
+        } else getPlayerSafe()
 
     /** Tracks whether player initialization completed successfully */
     private val isPlayerInitialized = MutableStateFlow(service.isPlayerReady.value)
@@ -189,7 +197,7 @@ class PlayerConnection(
     val canSkipNext = MutableStateFlow(true)
 
     val error = MutableStateFlow<PlaybackException?>(null)
-    val isMuted = service.isMuted
+    val isMuted = MutableStateFlow(service.isMuted.value)
     val currentStreamClient = service.currentStreamClient
 
     val waitingForNetworkConnection = service.waitingForNetworkConnection
@@ -208,9 +216,52 @@ class PlayerConnection(
 
     init {
         scope.launch {
+            service.isMuted.collect { muted ->
+                if (!deviceConnectManager.isRemoteActive) isMuted.value = muted
+            }
+        }
+        scope.launch {
             service.playerFlow.collect { newPlayer ->
-                if (newPlayer != null && newPlayer != attachedPlayer) {
+                if (newPlayer != null && !deviceConnectManager.isRemoteActive && newPlayer != attachedPlayer) {
                     updateAttachedPlayer(newPlayer)
+                }
+            }
+        }
+        scope.launch {
+            deviceConnectManager.state.collect { connection ->
+                val mirror = deviceConnectManager.remoteMirrorPlayer
+                val useRemote = deviceConnectManager.isRemoteActive && mirror != null
+                val desired: Player? = if (useRemote) mirror else getPlayerOrNull()
+                if (desired != null && desired !== attachedPlayer) updateAttachedPlayer(desired)
+                if (useRemote) {
+                    val snapshot = connection.remotePlayback ?: return@collect
+                    val track = snapshot.track
+                    if (track == null) {
+                        mediaMetadata.value = null
+                        queueWindows.value = emptyList()
+                        canSkipNext.value = false
+                        canSkipPrevious.value = false
+                        playbackState.value = Player.STATE_IDLE
+                        return@collect
+                    }
+                    mediaMetadata.value = MediaMetadata(
+                        id = track.id,
+                        title = track.title,
+                        artists = listOf(MediaMetadata.Artist(null, track.artist)),
+                        duration = (snapshot.durationMs / 1000L).toInt(),
+                        thumbnailUrl = track.artwork,
+                    )
+                    playbackState.value = Player.STATE_READY
+                    playWhenReady.value = snapshot.playing
+                    repeatMode.value = snapshot.repeatMode
+                    shuffleModeEnabled.value = snapshot.shuffle
+                    currentMediaItemIndex.value = mirror!!.currentMediaItemIndex
+                    queueTitle.value = snapshot.queueTitle
+                    canSkipPrevious.value = snapshot.previousQueueIndex >= 0 || snapshot.queueSize > 1
+                    canSkipNext.value = snapshot.nextQueueIndex >= 0 || snapshot.queueSize > 1
+                    isMuted.value = snapshot.muted
+                } else {
+                    isMuted.value = service.isMuted.value
                 }
             }
         }
@@ -230,7 +281,9 @@ class PlayerConnection(
         playbackState.value = newPlayer.playbackState
         playWhenReady.value = newPlayer.playWhenReady
         mediaMetadata.value = newPlayer.currentMetadata
-        queueTitle.value = service.queueTitle
+        queueTitle.value = if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.state.value.remotePlayback?.queueTitle
+        } else service.queueTitle
         queueWindows.value = newPlayer.getQueueWindows()
         currentWindowIndex.value = newPlayer.getCurrentQueueIndex()
         currentMediaItemIndex.value = newPlayer.currentMediaItemIndex
@@ -240,6 +293,14 @@ class PlayerConnection(
     }
 
     fun playQueue(queue: Queue) {
+        if (deviceConnectManager.isRemoteActive) {
+            scope.launch {
+                runCatching { queue.getInitialStatus() }
+                    .onSuccess { deviceConnectManager.submitRemoteQueue(it) }
+                    .onFailure { Timber.tag(TAG).e(it, "Unable to share selected queue with playing device") }
+            }
+            return
+        }
         // Block if Listen Together guest (unless internal sync)
         if (!allowInternalSync && shouldBlockPlaybackChanges?.invoke() == true) {
             Timber.tag("PlayerConnection").d("playQueue blocked - Listen Together guest")
@@ -288,6 +349,10 @@ class PlayerConnection(
     fun playNext(item: MediaItem) = playNext(listOf(item))
 
     fun playNext(items: List<MediaItem>) {
+        if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.submitRemoteQueueAddition(items, playNext = true)
+            return
+        }
         // Block if Listen Together guest (unless internal sync)
         if (!allowInternalSync && shouldBlockPlaybackChanges?.invoke() == true) {
             Timber.tag("PlayerConnection").d("playNext blocked - Listen Together guest")
@@ -304,6 +369,10 @@ class PlayerConnection(
     fun addToQueue(item: MediaItem) = addToQueue(listOf(item))
 
     fun addToQueue(items: List<MediaItem>) {
+        if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.submitRemoteQueueAddition(items, playNext = false)
+            return
+        }
         // Block if Listen Together guest (unless internal sync)
         if (!allowInternalSync && shouldBlockPlaybackChanges?.invoke() == true) {
             Timber.tag("PlayerConnection").d("addToQueue blocked - Listen Together guest")
@@ -318,6 +387,10 @@ class PlayerConnection(
     }
 
     fun toggleLike() {
+        if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.sendCommand("TOGGLE_LIKE")
+            return
+        }
         try {
             service.toggleLike()
         } catch (e: Exception) {
@@ -326,14 +399,38 @@ class PlayerConnection(
     }
 
     fun toggleMute() {
-        service.toggleMute()
+        if (deviceConnectManager.isRemoteActive) deviceConnectManager.sendCommand("TOGGLE_MUTE")
+        else service.toggleMute()
     }
 
     fun setMuted(muted: Boolean) {
-        service.setMuted(muted)
+        if (deviceConnectManager.isRemoteActive) {
+            if (deviceConnectManager.state.value.remotePlayback?.muted != muted) {
+                deviceConnectManager.sendCommand("TOGGLE_MUTE")
+            }
+        } else service.setMuted(muted)
+    }
+
+    fun startSleepTimer(minutes: Int, stopAfterCurrentSong: Boolean = false, fadeOut: Boolean = false) {
+        if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.sendSleepTimer(minutes, stopAfterCurrentSong, fadeOut)
+        } else {
+            if (minutes == 0) service.sleepTimer?.clear()
+            else service.sleepTimer?.start(minutes, stopAfterCurrentSong, fadeOut)
+            deviceConnectManager.refreshSnapshot()
+        }
+    }
+
+    fun setPlayerVolume(volume: Float) {
+        // Android volume on this device is deliberately independent of the remote output.
+        service.playerVolume.value = volume
     }
 
     fun toggleLibrary() {
+        if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.sendCommand("TOGGLE_LIBRARY")
+            return
+        }
         try {
             service.toggleLibrary()
         } catch (e: Exception) {
@@ -346,6 +443,11 @@ class PlayerConnection(
      */
     fun togglePlayPause() {
         if (!allowInternalSync && shouldBlockPlaybackChanges?.invoke() == true) return
+        if (deviceConnectManager.isRemoteActive) {
+            val playingOnPeer = deviceConnectManager.state.value.remotePlayback?.playing == true
+            deviceConnectManager.sendCommand(if (playingOnPeer) "PAUSE" else "PLAY")
+            return
+        }
         try {
             val castHandler = service.castConnectionHandler
             if (castHandler?.isCasting?.value == true) {
@@ -366,6 +468,10 @@ class PlayerConnection(
      * Start playback - handles Cast when active
      */
     fun play() {
+        if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.sendCommand("PLAY")
+            return
+        }
         try {
             val castHandler = service.castConnectionHandler
             if (castHandler?.isCasting?.value == true) {
@@ -374,7 +480,7 @@ class PlayerConnection(
                 if (player.playbackState == Player.STATE_IDLE) {
                     player.prepare()
                 }
-                player.playWhenReady = true
+                player.play()
             }
         } catch (e: Exception) {
             Timber.tag(TAG).e(e, "Error in play")
@@ -385,12 +491,16 @@ class PlayerConnection(
      * Pause playback - handles Cast when active
      */
     fun pause() {
+        if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.sendCommand("PAUSE")
+            return
+        }
         try {
             val castHandler = service.castConnectionHandler
             if (castHandler?.isCasting?.value == true) {
                 castHandler.pause()
             } else {
-                player.playWhenReady = false
+                player.pause()
             }
         } catch (e: Exception) {
             Timber.tag(TAG).e(e, "Error in pause")
@@ -414,6 +524,10 @@ class PlayerConnection(
     }
 
     fun seekToNext() {
+        if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.sendCommand("NEXT")
+            return
+        }
         try {
             // When casting, use Cast skip instead of local player
             val castHandler = service.castConnectionHandler
@@ -435,6 +549,10 @@ class PlayerConnection(
     var onRestartSong: (() -> Unit)? = null
 
     fun seekToPrevious() {
+        if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.sendCommand("PREVIOUS")
+            return
+        }
         try {
             // When casting, use Cast skip instead of local player
             val castHandler = service.castConnectionHandler
@@ -625,7 +743,9 @@ class PlayerConnection(
         reason: Int,
     ) {
         queueWindows.value = player.getQueueWindows()
-        queueTitle.value = service.queueTitle
+        queueTitle.value = if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.state.value.remotePlayback?.queueTitle
+        } else service.queueTitle
         currentMediaItemIndex.value = player.currentMediaItemIndex
         currentWindowIndex.value = player.getCurrentQueueIndex()
         updateCanSkipPreviousAndNext()
@@ -652,6 +772,14 @@ class PlayerConnection(
     }
 
     private fun updateCanSkipPreviousAndNext() {
+        if (deviceConnectManager.isRemoteActive) {
+            val snapshot = deviceConnectManager.state.value.remotePlayback
+            canSkipPrevious.value = snapshot?.track != null &&
+                (snapshot.previousQueueIndex >= 0 || snapshot.queueSize > 1)
+            canSkipNext.value = snapshot?.track != null &&
+                (snapshot.nextQueueIndex >= 0 || snapshot.queueSize > 1)
+            return
+        }
         if (!player.currentTimeline.isEmpty) {
             val window =
                 player.currentTimeline.getWindow(player.currentMediaItemIndex, Timeline.Window())

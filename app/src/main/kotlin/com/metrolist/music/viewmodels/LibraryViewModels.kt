@@ -163,11 +163,14 @@ constructor(
     val filteredArtists =
         combine(allArtists, searchQuery) { artists, query ->
             val normalizedQuery = query.normalizeForSearch()
-            artists
-                .filter { artist ->
+            val matches = if (normalizedQuery.isBlank()) {
+                artists
+            } else {
+                artists.filter { artist ->
                     matchesNormalizedQuery(normalizedQuery, artist.artist.name)
                 }
-                .distinctBy { it.id }
+            }
+            matches.distinctBy { it.id }
         }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     fun sync() {

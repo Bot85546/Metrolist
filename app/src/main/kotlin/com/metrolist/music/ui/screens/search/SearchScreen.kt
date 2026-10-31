@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -64,7 +63,6 @@ import com.metrolist.music.constants.SearchSource
 import com.metrolist.music.constants.SearchSourceKey
 import com.metrolist.music.db.entities.SearchHistory
 import com.metrolist.music.playback.queues.YouTubeQueue
-import com.metrolist.music.ui.component.HideOnScrollFAB
 import com.metrolist.music.utils.SearchRoutes
 import com.metrolist.music.utils.rememberEnumPreference
 import com.metrolist.music.utils.rememberPreference
@@ -86,7 +84,6 @@ fun SearchScreen(
     val playerConnection = LocalPlayerConnection.current
     val isPlayerExpanded = LocalIsPlayerExpanded.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    val lazyListState = rememberLazyListState()
     var isHandlingScrollToTop by remember { mutableStateOf(false) }
 
     val scrollToTopCount by savedStateHandle.getStateFlow("scrollToTopCount", 0).collectAsStateWithLifecycle(initialValue = 0)
@@ -305,11 +302,6 @@ fun SearchScreen(
                 }
             }
 
-            HideOnScrollFAB(
-                lazyListState = lazyListState,
-                icon = R.drawable.mic,
-                onClick = { navController.navigate("recognition") },
-            )
         }
     }
 

@@ -7,7 +7,6 @@ package com.metrolist.music
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.ForegroundServiceStartNotAllowedException
 import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Intent
@@ -64,6 +63,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -87,6 +88,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -242,9 +245,7 @@ class MainActivity : FragmentActivity() {
     companion object {
         private const val ACTION_SEARCH = "com.metrolist.music.action.SEARCH"
         private const val ACTION_LIBRARY = "com.metrolist.music.action.LIBRARY"
-        const val ACTION_RECOGNITION = "com.metrolist.music.action.RECOGNITION"
         const val ACTION_OPEN_WIDGET_TARGET = "com.metrolist.music.action.OPEN_WIDGET_TARGET"
-        const val EXTRA_AUTO_START_RECOGNITION = "auto_start_recognition"
         const val EXTRA_WIDGET_TARGET_TYPE = "widget_target_type"
         const val EXTRA_WIDGET_TARGET_ID = "widget_target_id"
     }
@@ -260,6 +261,9 @@ class MainActivity : FragmentActivity() {
 
     @Inject
     lateinit var listenTogetherManager: com.metrolist.music.listentogether.ListenTogetherManager
+
+    @Inject
+    lateinit var deviceConnectManager: com.metrolist.music.connect.DeviceConnectManager
 
     private lateinit var navController: NavHostController
     private var pendingIntent: Intent? = null
@@ -281,7 +285,7 @@ class MainActivity : FragmentActivity() {
                 service: IBinder?,
             ) {
                 if (service is MusicBinder) {
-                    playerConnection = PlayerConnection(this@MainActivity, service, database, lifecycleScope)
+                    playerConnection = PlayerConnection(this@MainActivity, service, database, lifecycleScope, deviceConnectManager)
                     playerConnectionSnapshot = playerConnection
                     listenTogetherManager.setPlayerConnection(playerConnection)
                 }
@@ -313,6 +317,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onStart() {
         super.onStart()
+        deviceConnectManager.setForeground(true)
         // Request notification permission on Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -320,42 +325,34 @@ class MainActivity : FragmentActivity() {
             }
         }
 
-        // Start the playback service explicitly once so it can outlive binding.
-        // Re-issuing startForegroundService() while an existing service instance is already
-        // running can trigger "did not then call startForeground" on some Android 9 devices
-        // when the framework expects a fresh foreground promotion for that start request.
-        if (!MusicService.isRunning) {
-            val serviceIntent = Intent(this, MusicService::class.java)
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    ContextCompat.startForegroundService(this, serviceIntent)
-                } else {
-                    startService(serviceIntent)
-                }
-            } catch (e: ForegroundServiceStartNotAllowedException) {
-                Timber.w(e, "Cannot start foreground service from background")
-            } catch (e: IllegalStateException) {
-                Timber.w(e, "Failed to start foreground service")
-            }
-        }
-
-        // Bind to service - if already bound, this is a no-op but ensures we stay connected
+        // A UI-only binding must not start a foreground playback service.
+        // Media3 promotes the session automatically once playback begins.
         if (!isServiceBound) {
-            bindService(
+            isServiceBound = bindService(
                 Intent(this, MusicService::class.java),
                 serviceConnection,
                 BIND_AUTO_CREATE,
             )
-            isServiceBound = true
         }
     }
 
     override fun onStop() {
-        // Keep the service binding, PlayerConnection and Listen Together wiring alive while
-        // the Activity is backgrounded. The MusicService is a foreground service and keeps
-        // running, so the host must keep reporting playback state to the LT server; detaching
-        // the player listener here used to break LT for any host that wasn't staring at the
-        // app the whole session. Full teardown happens in onDestroy() via safeUnbindService().
+        deviceConnectManager.setForeground(false)
+        // Only keep an off-screen binding when playback is active/starting, or
+        // Listen Together needs to monitor the player while the UI is backgrounded.
+        if (!listenTogetherManager.isInRoom && !deviceConnectManager.isRemoteActive &&
+            playerConnection?.service?.hasActivePlaybackIntent() != true
+        ) {
+            // The service keeps an additional controller only while music is
+            // starting/playing. Release it before unbinding so idle teardown
+            // cannot be prevented by its own MediaController connection.
+            playerConnection?.service?.releaseIdlePlaybackNotificationController()
+            safeUnbindService("onStop() without active playback")
+            playerConnection = null
+            playerConnectionSnapshot = null
+            // Ensure a previously started (but now idle) media service exits.
+            stopService(Intent(this, MusicService::class.java))
+        }
         super.onStop()
     }
 
@@ -364,7 +361,8 @@ class MainActivity : FragmentActivity() {
             listenTogetherManager.disconnect()
         }
         super.onDestroy()
-        val stopServiceOnClear = dataStore.get(StopMusicOnTaskClearKey, false) && isFinishing
+        val stopServiceOnClear = dataStore.get(StopMusicOnTaskClearKey, false) &&
+            isFinishing && !deviceConnectManager.isRemoteActive
 
         // Full cleanup - only on actual destroy
         playerConnection?.dispose()
@@ -859,6 +857,9 @@ class MainActivity : FragmentActivity() {
                         ?: remember { mutableStateOf(false) }
                 val playerReady by playerReadyState
                 val activePlayerConnection = if (playerReady) playerConnection else null
+                val deviceConnectUi by deviceConnectManager.state.collectAsStateWithLifecycle()
+                val isRemoteMirror = deviceConnectManager.isRemoteActive
+                val activeTrackId = activePlayerConnection?.mediaMetadata?.collectAsStateWithLifecycle()?.value?.id
 
                 val playerAwareWindowInsets =
                     remember(
@@ -917,20 +918,22 @@ class MainActivity : FragmentActivity() {
 
                     topAppBarScrollBehavior.state.resetHeightOffset()
 
-                    // Collapse player when navigating to equalizer
-                    if (navBackStackEntry?.destination?.route == "equalizer" &&
-                        playerBottomSheetState.isExpanded
-                    ) {
-                        playerBottomSheetState.collapseSoft()
-                    }
-
                     // Track previous tab for animations
                     navController.currentBackStackEntry?.destination?.route?.let {
                         setPreviousTab(it)
                     }
                 }
 
-                LaunchedEffect(activePlayerConnection) {
+                LaunchedEffect(activePlayerConnection, isRemoteMirror, activeTrackId,
+                    deviceConnectUi.remotePlayback?.track?.id) {
+                    if (isRemoteMirror) {
+                        if (deviceConnectUi.remotePlayback?.track == null) {
+                            if (!playerBottomSheetState.isDismissed) playerBottomSheetState.dismiss()
+                            return@LaunchedEffect
+                        }
+                        if (playerBottomSheetState.isDismissed) playerBottomSheetState.collapseSoft()
+                        return@LaunchedEffect
+                    }
                     val player = runCatching { activePlayerConnection?.player }.getOrNull()
                     if (player?.currentMediaItem == null) {
                         if (!playerBottomSheetState.isDismissed) {
@@ -988,12 +991,10 @@ class MainActivity : FragmentActivity() {
                 LaunchedEffect(Unit) {
                     if (pendingIntent != null) {
                         handleWidgetTargetIntent(pendingIntent!!, navController)
-                        handleRecognitionIntent(pendingIntent!!, navController)
                         handleDeepLinkIntent(pendingIntent!!, navController)
                         pendingIntent = null
                     } else {
                         handleWidgetTargetIntent(intent, navController)
-                        handleRecognitionIntent(intent, navController)
                         handleDeepLinkIntent(intent, navController)
                     }
                 }
@@ -1002,7 +1003,6 @@ class MainActivity : FragmentActivity() {
                     val listener =
                         Consumer<Intent> { intent ->
                             handleWidgetTargetIntent(intent, navController)
-                            handleRecognitionIntent(intent, navController)
                             handleDeepLinkIntent(intent, navController)
                         }
 
@@ -1043,6 +1043,7 @@ class MainActivity : FragmentActivity() {
                     LocalShimmerTheme provides ShimmerTheme,
                     LocalSyncUtils provides syncUtils,
                     LocalListenTogetherManager provides listenTogetherManager,
+                    LocalDeviceConnectManager provides deviceConnectManager,
                     LocalChangelogState provides showChangelog,
                     LocalArtistNameAliases provides artistNameAliases,
                 ) {
@@ -1081,14 +1082,36 @@ class MainActivity : FragmentActivity() {
                                                     contentDescription = stringResource(R.string.stats),
                                                 )
                                             }
-                                            if (listenTogetherInTopBar) {
-                                                IconButton(onClick = { navController.navigate("listen_together_from_topbar") }) {
+                                            val connectSwitchDescription = stringResource(R.string.device_connect)
+                                            Switch(
+                                                checked = deviceConnectUi.enabled && deviceConnectUi.connected,
+                                                onCheckedChange = { enabled ->
+                                                    deviceConnectManager.setEnabled(enabled)
+                                                    if (enabled && deviceConnectUi.trustedDeviceName == null) {
+                                                        navController.navigate("settings/device_connect")
+                                                    }
+                                                },
+                                                modifier = Modifier
+                                                    .padding(horizontal = 2.dp)
+                                                    .semantics { contentDescription = connectSwitchDescription },
+                                                colors = SwitchDefaults.colors(
+                                                    checkedThumbColor = Color.White,
+                                                    checkedTrackColor = Color(0xFF3B82F6),
+                                                    checkedBorderColor = Color.Transparent,
+                                                    checkedIconColor = Color(0xFF3B82F6),
+                                                    uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                                                    uncheckedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                                                    uncheckedIconColor = MaterialTheme.colorScheme.surface,
+                                                ),
+                                                thumbContent = {
                                                     Icon(
-                                                        painter = painterResource(R.drawable.group_outlined),
-                                                        contentDescription = stringResource(R.string.together),
+                                                        painter = painterResource(R.drawable.link),
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(16.dp),
                                                     )
-                                                }
-                                            }
+                                                },
+                                            )
                                             IconButton(onClick = { showAccountDialog = true }) {
                                                 BadgedBox(badge = {
                                                     if (latestVersionName != BuildConfig.BASE_VERSION_NAME) {
@@ -1189,15 +1212,6 @@ class MainActivity : FragmentActivity() {
                                     }
                                 }
 
-                            val onSearchLongClick: () -> Unit =
-                                remember(navController) {
-                                    {
-                                        navController.navigate("recognition") {
-                                            launchSingleTop = true
-                                        }
-                                    }
-                                }
-
                             // Pre-calculate values for graphicsLayer to avoid reading state during composition
                             val navBarTotalHeight = bottomInset + NavigationBarHeight
 
@@ -1217,7 +1231,6 @@ class MainActivity : FragmentActivity() {
                                         onItemClick = onNavItemClick,
                                         pureBlack = pureBlack,
                                         slimNav = slimNav,
-                                        onSearchLongClick = onSearchLongClick,
                                         onHomeLongHold = { showAccountDialog = true },
                                         modifier =
                                             Modifier
@@ -1319,22 +1332,12 @@ class MainActivity : FragmentActivity() {
                                     }
                                 }
 
-                            val onRailSearchLongClick: () -> Unit =
-                                remember(navController) {
-                                    {
-                                        navController.navigate("recognition") {
-                                            launchSingleTop = true
-                                        }
-                                    }
-                                }
-
                             if (showRail && currentRoute != "wrapped") {
                                 AppNavigationRail(
                                     navigationItems = navigationItems,
                                     currentRoute = currentRoute,
                                     onItemClick = onRailItemClick,
                                     pureBlack = pureBlack,
-                                    onSearchLongClick = onRailSearchLongClick,
                                     onHomeLongHold = { showAccountDialog = true },
                                 )
                             }
@@ -1526,23 +1529,6 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    /**
-     * Handles the ACTION_RECOGNITION intent sent from the Music Recognizer Widget.
-     * Always navigates to the recognition screen to show the result.
-     */
-    private fun handleRecognitionIntent(
-        intent: Intent,
-        navController: NavHostController,
-    ) {
-        if (intent.action != ACTION_RECOGNITION) return
-        val autoStart = intent.getBooleanExtra(EXTRA_AUTO_START_RECOGNITION, false)
-        intent.action = null
-        intent.removeExtra(EXTRA_AUTO_START_RECOGNITION)
-        navController.navigate(if (autoStart) "recognition?autoStart=true" else "recognition") {
-            launchSingleTop = true
-        }
-    }
-
     private sealed class WidgetTargetRoute(val route: String) {
         data class LocalPlaylist(val id: String) : WidgetTargetRoute("local_playlist/$id")
         data class OnlinePlaylist(val id: String) : WidgetTargetRoute("online_playlist/$id")
@@ -1722,6 +1708,7 @@ val LocalPlayerAwareWindowInsets = compositionLocalOf<WindowInsets> { error("No 
 val LocalDownloadUtil = staticCompositionLocalOf<DownloadUtil> { error("No DownloadUtil provided") }
 val LocalSyncUtils = staticCompositionLocalOf<SyncUtils> { error("No SyncUtils provided") }
 val LocalListenTogetherManager = staticCompositionLocalOf<com.metrolist.music.listentogether.ListenTogetherManager?> { null }
+val LocalDeviceConnectManager = staticCompositionLocalOf<com.metrolist.music.connect.DeviceConnectManager?> { null }
 val LocalChangelogState = staticCompositionLocalOf<MutableState<Boolean>> { error("No LocalChangelogState provided") }
 val LocalArtistNameAliases = staticCompositionLocalOf<Map<String, String>> { emptyMap() }
 val LocalIsPlayerExpanded = compositionLocalOf { false }

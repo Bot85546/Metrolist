@@ -26,8 +26,6 @@ import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.ArtistConjunctions
 import com.metrolist.innertube.models.YouTubeLocale
 import com.metrolist.kugou.KuGou
-import com.metrolist.lastfm.LastFM
-import com.metrolist.music.BuildConfig
 import com.metrolist.music.constants.*
 import com.metrolist.music.di.ApplicationScope
 import com.metrolist.music.extensions.toEnum
@@ -87,6 +85,19 @@ class App :
             Timber.e(e, "Failed to ensure DataStore directory")
         }
 
+        // Apply the customized Library defaults once, including after restoring
+        // a backup from the original MetroList. Subsequent user choices persist.
+        applicationScope.launch(Dispatchers.IO) {
+            safeDataStoreEdit { preferences ->
+                if (preferences[CustomLibraryDefaultsAppliedKey] != true) {
+                    preferences[ShowCachedPlaylistKey] = false
+                    preferences[ShowUploadedPlaylistKey] = false
+                    preferences[ChipSortTypeKey] = LibraryFilter.LIBRARY.name
+                    preferences[CustomLibraryDefaultsAppliedKey] = true
+                }
+            }
+        }
+
         // Plant logging before extraction services initialize.
         Timber.plant(Timber.DebugTree())
         InnerTubeXPlayer.initialize(this)
@@ -143,12 +154,6 @@ class App :
         if (languageTag == "zh-TW") {
             KuGou.useTraditionalChinese = true
         }
-
-        // Initialize LastFM with API keys from BuildConfig (GitHub Secrets)
-        LastFM.initialize(
-            apiKey = BuildConfig.LASTFM_API_KEY.takeIf { it.isNotEmpty() } ?: "",
-            secret = BuildConfig.LASTFM_SECRET.takeIf { it.isNotEmpty() } ?: "",
-        )
 
         if (settings[ProxyEnabledKey] == true) {
             val username = settings[ProxyUsernameKey].orEmpty()
@@ -246,19 +251,6 @@ class App :
                     } catch (e: Exception) {
                         Timber.e(e, "Could not parse cookie. Clearing existing cookie.")
                         forgetAccount(this@App)
-                    }
-                }
-        }
-
-        applicationScope.launch(Dispatchers.IO) {
-            dataStore.data
-                .map { it[LastFMSessionKey] }
-                .distinctUntilChanged()
-                .collect { session ->
-                    try {
-                        LastFM.sessionKey = session
-                    } catch (e: Exception) {
-                        Timber.e("Error while loading last.fm session key. %s", e.message)
                     }
                 }
         }

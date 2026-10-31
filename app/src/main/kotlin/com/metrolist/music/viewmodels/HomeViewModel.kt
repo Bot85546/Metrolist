@@ -82,11 +82,22 @@ internal fun buildSpeedDialItems(
     pinned: List<YTItem>,
     keepListening: List<YTItem>,
     quickPicks: List<YTItem>,
-    home: List<YTItem>,
-): List<YTItem> =
-    (pinned + keepListening + quickPicks + home)
-        .distinctBy { it.id }
-        .take(27)
+    home: Iterable<YTItem>,
+): List<YTItem> {
+    val seen = HashSet<String>(27)
+    return buildList(27) {
+        // Preserve source priority and first occurrence while avoiding the
+        // intermediate concatenated lists and scanning past the 27-item limit.
+        for (source in listOf(pinned, keepListening, quickPicks, home)) {
+            for (item in source) {
+                if (seen.add(item.id)) {
+                    add(item)
+                    if (size == 27) return@buildList
+                }
+            }
+        }
+    }
+}
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
@@ -179,7 +190,12 @@ class HomeViewModel @Inject constructor(
                             thumbnail = song.thumbnailUrl ?: "",
                         )
                     },
-                home = home?.sections.orEmpty().flatMap { it.items },
+                // Flatten Home sections lazily: Speed Dial stops at 27 unique items,
+                // so constructing the entire Home recommendations list is wasteful.
+                home = home?.sections.orEmpty()
+                    .asSequence()
+                    .flatMap { it.items.asSequence() }
+                    .asIterable(),
             )
         }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
@@ -578,29 +594,33 @@ class HomeViewModel @Inject constructor(
     private val _isLoadingMore = MutableStateFlow(false)
     fun loadMoreYouTubeItems(continuation: String?) {
         if (continuation == null || _isLoadingMore.value) return
-        val hideExplicit = context.dataStore.get(HideExplicitKey, false)
-        val hideVideoSongs = context.dataStore.get(HideVideoSongsKey, false)
-        val hideYoutubeShorts = context.dataStore.get(HideYoutubeShortsKey, false)
+        // Guard before dispatching: two quick scroll callbacks must not load
+        // the same continuation twice while the IO coroutine is being queued.
+        _isLoadingMore.value = true
 
         viewModelScope.launch(Dispatchers.IO) {
-            _isLoadingMore.value = true
-            val nextSections = YouTube.home(continuation).getOrNull() ?: run {
-                _isLoadingMore.value = false
-                return@launch
-            }
+            try {
+                // DataStore.get() is blocking and must not stall Home scrolling.
+                val hideExplicit = context.dataStore.get(HideExplicitKey, false)
+                val hideVideoSongs = context.dataStore.get(HideVideoSongsKey, false)
+                val hideYoutubeShorts = context.dataStore.get(HideYoutubeShortsKey, false)
+                val nextSections = YouTube.home(continuation).getOrNull() ?: return@launch
 
-            homePage.value = nextSections.copy(
-                chips = homePage.value?.chips,
-                sections = (homePage.value?.sections.orEmpty() + nextSections.sections).mapNotNull { section ->
-                    val filteredItems = section.items
-                        .filterOutNulls()
-                        .filterExplicit(hideExplicit)
-                        .filterVideoSongs(hideVideoSongs)
-                        .filterYoutubeShorts(hideYoutubeShorts)
-                    if (filteredItems.isEmpty()) null else section.copy(items = filteredItems)
-                }
-            )
-            _isLoadingMore.value = false
+                homePage.value = nextSections.copy(
+                    chips = homePage.value?.chips,
+                    sections = (homePage.value?.sections.orEmpty() + nextSections.sections).mapNotNull { section ->
+                        val filteredItems = section.items
+                            .filterOutNulls()
+                            .filterExplicit(hideExplicit)
+                            .filterVideoSongs(hideVideoSongs)
+                            .filterYoutubeShorts(hideYoutubeShorts)
+                        if (filteredItems.isEmpty()) null else section.copy(items = filteredItems)
+                    }
+                )
+            } finally {
+                // A failed or cancelled network request must not block future pages.
+                _isLoadingMore.value = false
+            }
         }
     }
 

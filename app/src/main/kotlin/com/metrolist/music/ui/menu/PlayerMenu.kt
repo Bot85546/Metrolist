@@ -118,7 +118,6 @@ fun PlayerMenu(
     val database = LocalDatabase.current
     val playerConnection = LocalPlayerConnection.current ?: return
     val playerVolume = playerConnection.service.playerVolume.collectAsStateWithLifecycle()
-
     // Cast state for volume control - safely access castConnectionHandler to prevent crashes
     val castHandler =
         remember(playerConnection) {
@@ -284,9 +283,10 @@ fun PlayerMenu(
                         if (isCasting) {
                             castHandler?.setVolume(volume)
                         } else {
-                            playerConnection.service.playerVolume.value = volume
+                            playerConnection.setPlayerVolume(volume)
                         }
                     },
+                    onValueChangeFinished = {},
                     modifier = Modifier.weight(1f),
                     accentColor = MaterialTheme.colorScheme.primary,
                 )
@@ -676,23 +676,6 @@ fun PlayerMenu(
                         if (isQueueTrigger != true) {
                             add(
                                 Material3MenuItemData(
-                                    title = { Text(text = stringResource(R.string.equalizer)) },
-                                    description = { Text(text = stringResource(R.string.equalizer_desc)) },
-                                    icon = {
-                                        Icon(
-                                            painter = painterResource(R.drawable.equalizer),
-                                            contentDescription = null,
-                                            modifier = Modifier.size(24.dp),
-                                        )
-                                    },
-                                    onClick = {
-                                        navController.navigate("equalizer")
-                                        onDismiss()
-                                    },
-                                ),
-                            )
-                            add(
-                                Material3MenuItemData(
                                     title = { Text(text = stringResource(R.string.system_equalizer)) },
                                     description = { Text(text = stringResource(R.string.system_equalizer_desc)) },
                                     icon = {
@@ -703,7 +686,7 @@ fun PlayerMenu(
                                         )
                                     },
                                     onClick = {
-                                        val audioSessionId = playerConnection.player.audioSessionId
+                                        val audioSessionId = playerConnection.localPlayer.audioSessionId
                                         if (audioSessionId != C.AUDIO_SESSION_ID_UNSET && audioSessionId > 0) {
                                             val intent = Intent(AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL).apply {
                                                 putExtra(AudioEffect.EXTRA_AUDIO_SESSION, audioSessionId)

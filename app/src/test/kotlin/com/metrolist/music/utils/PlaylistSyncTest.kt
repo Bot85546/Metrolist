@@ -3,9 +3,11 @@ package com.metrolist.music.utils
 import com.metrolist.innertube.models.PlaylistItem
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.pages.PlaylistPage
+import com.metrolist.music.db.entities.PlaylistEntity
 import com.metrolist.music.db.entities.PlaylistSongMap
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.time.LocalDateTime
 
 class PlaylistSyncTest {
     @Test
@@ -22,6 +24,31 @@ class PlaylistSyncTest {
             idsRemovedRemotely(local, previousRemoteIds = setOf("removedOnYouTube", "stillRemote"), remoteIds = setOf("stillRemote")),
         )
         assertEquals(emptySet<String>(), idsRemovedRemotely(local, previousRemoteIds = null, remoteIds = setOf("stillRemote")))
+    }
+
+    @Test
+    fun `special YouTube playlists do not appear as saved user playlists`() {
+        for (id in listOf("LM", "SE", "VLLM", "VLSE")) {
+            assertEquals(true, isYouTubeSystemPlaylist(id))
+        }
+        for (id in listOf(null, "PL123", "VLPL123", "LM123")) {
+            assertEquals(false, isYouTubeSystemPlaylist(id))
+        }
+    }
+
+    @Test
+    fun `missing saved playlists are unbookmarked only once`() {
+        val saved = PlaylistEntity(
+            id = "saved",
+            name = "Saved",
+            browseId = "PLsaved",
+            bookmarkedAt = LocalDateTime.of(2026, 10, 31, 12, 0),
+        )
+        val missing = emptySet<String>()
+        assertEquals(true, shouldUnbookmarkMissingPlaylist(saved, missing))
+        assertEquals(false, shouldUnbookmarkMissingPlaylist(saved.copy(bookmarkedAt = null), missing))
+        assertEquals(false, shouldUnbookmarkMissingPlaylist(saved, setOf("PLsaved")))
+        assertEquals(false, shouldUnbookmarkMissingPlaylist(saved.copy(browseId = null), missing))
     }
 
     @Test
@@ -95,6 +122,51 @@ class PlaylistSyncTest {
 
     private fun remoteSong(id: String, setVideoId: String? = null) =
         SongItem(id = id, title = id, artists = emptyList(), thumbnail = "", setVideoId = setVideoId)
+
+    @Test
+    fun `optimized pending preservation matches occurrence-based reference for duplicates`() {
+        // Deterministic randomized cases cover interleaved pending rows,
+        // confirmed copies, deleted-and-readded entries, and repeated IDs.
+        val random = kotlin.random.Random(20261029)
+        val ids = listOf("a", "b", "c")
+        val setIds = listOf<String?>(null, "set-a", "set-b", "set-c", "set-old")
+
+        repeat(500) { case ->
+            val local = (0 until random.nextInt(0, 12)).map { position ->
+                localMap(ids.random(random), position, setIds.random(random))
+            }
+            val remoteIds = (0 until random.nextInt(0, 12)).map { ids.random(random) }
+            val remoteSetIds = remoteIds.map { setIds.random(random) }
+
+            // Reference implementation deliberately mirrors the original
+            // occurrence-by-occurrence algorithm, independent of the new code.
+            val claimedRemote = BooleanArray(remoteIds.size)
+            val claimedLocal = BooleanArray(local.size)
+            val remoteBySetId = mutableMapOf<String, ArrayDeque<Int>>()
+            remoteIds.indices.forEach { index ->
+                remoteSetIds[index]?.let { setId ->
+                    remoteBySetId.getOrPut(setId) { ArrayDeque() }.add(index)
+                }
+            }
+            local.forEachIndexed { index, row ->
+                val claimed = row.setVideoId?.let { remoteBySetId[it]?.removeFirstOrNull() }
+                if (claimed != null) {
+                    claimedLocal[index] = true
+                    claimedRemote[claimed] = true
+                }
+            }
+            val pending = local.indices.filter { !claimedLocal[it] && local[it].setVideoId == null }
+            val remaining = remoteIds.indices.filterNot { claimedRemote[it] }.map(remoteIds::get)
+            val expected = localSongIndexesAbsentFromRemote(pending.map { local[it].songId }, remaining)
+                .map { local[pending[it]] }
+
+            assertEquals(
+                "Mismatch in deterministic playlist fixture #$case",
+                expected,
+                preservedLocalSongs(local, remoteIds, remoteSetIds),
+            )
+        }
+    }
 
     @Test
     fun `backfill fills null setVideoIds positionally`() {

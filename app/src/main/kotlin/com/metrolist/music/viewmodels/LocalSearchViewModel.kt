@@ -60,11 +60,16 @@ constructor(
                             database.searchPlaylists(query, PREVIEW_SIZE),
                         ) { songs, albums, artists, playlists ->
                             val filteredSongs = if (hideVideoSongs) songs.filter { !it.song.isVideo } else songs
-                            val localSongs = filteredSongs.map { it }
-                            val localAlbums = albums.map { it }
-                            val localArtists = artists.map { it }
-                            val localPlaylists = playlists.map { it }
-                            localSongs + localAlbums + localArtists + localPlaylists
+                            // Build the result once instead of creating four identity
+                            // copies and three successive concatenated lists.
+                            buildList<LocalItem>(
+                                filteredSongs.size + albums.size + artists.size + playlists.size
+                            ) {
+                                addAll(filteredSongs)
+                                addAll(albums)
+                                addAll(artists)
+                                addAll(playlists)
+                            }
                         }
 
                     LocalFilter.SONG -> database.searchSongs(query).map { songs ->

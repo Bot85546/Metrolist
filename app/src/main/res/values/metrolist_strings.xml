@@ -1,5 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="device_connect">Device Connect</string>
+    <string name="device_connect_explanation">Control music playing on your other paired Galaxy device. Audio always stays on the playing device.</string>
+    <string name="device_connect_unavailable">This build does not include Google Nearby Connections. Device Connect needs the GMS variant of Metrolitt.</string>
+    <string name="device_connect_permissions">Allow nearby-device permissions</string>
+    <string name="device_connect_pair">Pair another device</string>
+    <string name="device_connect_search">Search again</string>
+    <string name="device_connect_disconnect">Disconnect</string>
+    <string name="device_connect_connect">Connect paired device</string>
+    <string name="device_connect_forget">Forget paired device</string>
+    <string name="device_connect_pair_title">Confirm pairing code</string>
+    <string name="device_connect_pair_description">Check that this code matches on both devices. Only accept if it matches.</string>
+    <string name="device_connect_accept">Codes match</string>
+    <string name="device_connect_reject">Cancel pairing</string>
+    <string name="device_connect_no_remote">No music is currently playing on the connected device.</string>
+    <string name="device_connect_previous">Previous</string>
+    <string name="device_connect_next">Next</string>
+    <string name="device_connect_play">Play</string>
+    <string name="device_connect_pause">Pause</string>
+    <string name="device_connect_shuffle">Shuffle</string>
+    <string name="device_connect_repeat">Repeat</string>
+    <string name="device_connect_queue">Up next</string>
+    <string name="device_connect_playing_on">Playing on %1$s</string>
+    <string name="device_connect_switch_output_here">Play on this device instead</string>
+    <string name="device_connect_switch_output_other">Play on %1$s instead</string>
+    <string name="device_connect_sleep_timer_remaining">Sleep timer: %1$d min remaining</string>
+    <string name="device_connect_sleep_timer_end_of_song">Sleep timer: end of song</string>
+    <string name="device_connect_cancel_sleep_timer">Cancel sleep timer</string>
+    <string name="device_connect_queue_window">Showing %1$d of %2$d queued tracks</string>
     <string name="local_history">Local</string>
     <string name="remote_history">Remote</string>
 
@@ -66,6 +94,7 @@
     <string name="like_all">Like all</string>
     <string name="dislike_all">Dislike all</string>
     <string name="sort_by_last_updated">Date updated</string>
+    <string name="sort_by_times_played">Times played</string>
     <string name="link_copied">Link copied to clipboard</string>
     <string name="starting_radio">Starting radio…</string>
     <string name="now_playing">Now Playing</string>

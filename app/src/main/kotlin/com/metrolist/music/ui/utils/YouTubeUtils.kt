@@ -13,6 +13,9 @@ private val GOOGLEUSERCONTENT_SIZE_PATTERN =
     Regex("^(https://(?:lh3|yt3)\\.googleusercontent\\.com/[^?]*?)=w(\\d+)-h(\\d+)[^?]*(\\?.*)?$")
 private val GGPHT_SIZE_PATTERN =
     Regex("^(https://yt3\\.ggpht\\.com/[^?=]+)=(?:s\\d+|w\\d+-h\\d+)[^?]*(\\?.*)?$")
+private val GOOGLEUSERCONTENT_SQUARE_SIZE_PATTERN =
+    Regex("^(https://(?:lh3|yt3)\\.googleusercontent\\.com/[^?]*?)=s\\d+[^?]*(\\?.*)?$")
+
 fun String.resize(
     width: Int? = null,
     height: Int? = null,
@@ -30,6 +33,12 @@ fun String.resize(
             val targetHeight = height ?: ((width!!.toDouble() * originalHeight) / originalWidth).roundToInt()
             return "${group[1]}=w${targetWidth.coerceAtLeast(1)}-h${targetHeight.coerceAtLeast(1)}-p-l90-rj$query"
         }
+
+    GOOGLEUSERCONTENT_SQUARE_SIZE_PATTERN.matchEntire(this)?.groupValues?.let { group ->
+        val targetWidth = (width ?: height!!).coerceAtLeast(1)
+        val targetHeight = (height ?: width!!).coerceAtLeast(1)
+        return "${group[1]}=w$targetWidth-h$targetHeight-p-l90-rj${group[2]}"
+    }
 
     GGPHT_SIZE_PATTERN.matchEntire(this)?.groupValues?.let { group ->
         val query = group[2]
