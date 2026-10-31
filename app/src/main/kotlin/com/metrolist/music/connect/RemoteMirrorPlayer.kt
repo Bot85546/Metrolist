@@ -53,7 +53,11 @@ class RemoteMirrorPlayer(
         val snapshot = remote
         if (snapshot !== cachedState) {
             cachedState = snapshot
-            val entries = snapshot?.queue.orEmpty().ifEmpty { listOfNotNull(snapshot?.track) }
+            // The peer may retain queue metadata briefly after stopping. An absent
+            // current track must mean an empty timeline to Android's media session;
+            // otherwise System UI can keep showing a blank media notification.
+            val entries = if (snapshot?.track == null) emptyList() else
+                snapshot.queue.ifEmpty { listOfNotNull(snapshot.track) }
             val orderedIndex = entries.indexOfFirst { it.sourceIndex == snapshot?.queueIndex }
             cachedTimeline = if (entries.isEmpty()) Timeline.EMPTY else RemoteQueueTimeline(
                 entries,

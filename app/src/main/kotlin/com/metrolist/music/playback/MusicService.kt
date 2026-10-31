@@ -735,7 +735,9 @@ class MusicService :
         scope.launch {
             deviceConnectManager.state.collect {
                 val session = mediaSession ?: return@collect
-                val desired = if (deviceConnectManager.isRemoteActive) {
+                val remoteActive = deviceConnectManager.isRemoteActive
+                val remotePlayback = deviceConnectManager.state.value.remotePlayback
+                val desired = if (remoteActive) {
                     deviceConnectManager.remoteSessionPlayer ?: player
                 } else {
                     player
@@ -743,8 +745,12 @@ class MusicService :
                 if (session.player !== desired) {
                     session.player = desired
                 }
-                if (deviceConnectManager.isRemoteActive) updateNotification()
-                if (deviceConnectManager.isRemoteActive && deviceConnectManager.state.value.remotePlayback?.playing == true) {
+                if (remoteActive && remotePlayback?.track == null) {
+                    clearIdleMediaNotification()
+                } else if (remoteActive) {
+                    updateNotification()
+                }
+                if (remoteActive && remotePlayback?.track != null && remotePlayback.playing) {
                     connectPlaybackNotificationController()
                     // The mirrored system session is intentionally passive so Samsung Buds
                     // stay with the actual audio output. Still keep this service alive for
@@ -2437,6 +2443,7 @@ class MusicService :
         }
         lastTransitionedMediaId = mediaItem?.mediaId
         publishPortableArtwork(mediaItem)
+        if (mediaItem == null) clearIdleMediaNotification()
         activatePlaybackNotification()
         initialBufferRecoveryJob?.cancel()
         initialBufferRecoveryJob = null
@@ -3824,6 +3831,19 @@ class MusicService :
             stopOnFailure = false,
         )
 
+    /** Remove the foreground placeholder when the session no longer has a song.
+     * The Nearby connection stays paired; only the stale Android media tile is removed.
+     */
+    private fun clearIdleMediaNotification() {
+        if (mediaSession?.player?.currentMediaItem != null ||
+            castConnectionHandler?.isCasting?.value == true
+        ) return
+        foregroundRequestedForPlayback = false
+        latestMediaNotification = null
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID)
+    }
+
     private fun ensureForegroundChannelExists() {
         val nm = getSystemService(NotificationManager::class.java)
         nm?.createNotificationChannel(
@@ -4091,8 +4111,9 @@ class MusicService :
             // prevent Samsung Buds switching, even while the other device is playing.
             val peerIsPlaying = ::deviceConnectManager.isInitialized &&
                 deviceConnectManager.isRemoteActive &&
-                deviceConnectManager.state.value.remotePlayback?.playing == true
+                deviceConnectManager.state.value.remotePlayback?.let { it.track != null && it.playing } == true
             super.onUpdateNotification(session, startInForegroundRequired || peerIsPlaying)
+            if (session.player.currentMediaItem == null) clearIdleMediaNotification()
         } catch (e: ForegroundServiceStartNotAllowedException) {
             handleForegroundServiceStartNotAllowed(e)
         } catch (e: IllegalStateException) {
