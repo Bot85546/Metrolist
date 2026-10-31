@@ -18,6 +18,7 @@ import com.metrolist.music.models.MediaMetadata as MetrolittMetadata
 class RemoteMirrorPlayer(
     localPlayer: Player,
     private val connect: DeviceConnectManager,
+    private val passiveMediaSession: Boolean = false,
 ) : ForwardingPlayer(localPlayer) {
     private val remote: DevicePlaybackState?
         get() = connect.state.value.remotePlayback
@@ -197,9 +198,12 @@ class RemoteMirrorPlayer(
 
     override fun getPlaybackSuppressionReason(): Int = Player.PLAYBACK_SUPPRESSION_REASON_NONE
 
-    override fun getPlayWhenReady(): Boolean = remote?.playing == true
+    // Samsung's Buds Auto Switch observes Android media sessions. The secondary device
+    // must not advertise active playback: it would steal the earbuds from the real output.
+    // The UI uses the separate, fully live mirror; this view is only for system controls.
+    override fun getPlayWhenReady(): Boolean = !passiveMediaSession && remote?.playing == true
 
-    override fun isPlaying(): Boolean = remote?.playing == true
+    override fun isPlaying(): Boolean = !passiveMediaSession && remote?.playing == true
 
     override fun getRepeatMode(): Int = remote?.repeatMode ?: Player.REPEAT_MODE_OFF
 
@@ -214,10 +218,14 @@ class RemoteMirrorPlayer(
     override fun setPlayWhenReady(playWhenReady: Boolean) {
         // MediaSessionService calls setPlayWhenReady(false) while disposing an idle service.
         // That must never pause music on another device. Deliberate controls call pause().
-        if (playWhenReady) connect.sendCommand("PLAY")
+        if (playWhenReady) play()
     }
 
-    override fun play() = connect.sendCommand("PLAY")
+    override fun play() {
+        // Android presents a Play action for a passive remote session. Make it act as
+        // play/pause so the notification can still pause the currently playing song.
+        connect.sendCommand(if (passiveMediaSession && remote?.playing == true) "PAUSE" else "PLAY")
+    }
 
     override fun pause() = connect.sendCommand("PAUSE")
 

@@ -166,7 +166,6 @@ import com.metrolist.music.constants.ThumbnailCornerRadius
 import com.metrolist.music.constants.UseNewPlayerDesignKey
 import com.metrolist.music.db.entities.LyricsEntity
 import com.metrolist.music.extensions.metadata
-import com.metrolist.music.extensions.togglePlayPause
 import com.metrolist.music.extensions.toggleRepeatMode
 import com.metrolist.music.listentogether.RoomRole
 import com.metrolist.music.models.MediaMetadata
@@ -1865,7 +1864,7 @@ fun BottomSheetPlayer(
                                                 playerConnection.player.seekTo(0, 0)
                                                 playerConnection.player.playWhenReady = true
                                             } else {
-                                                playerConnection.player.togglePlayPause()
+                                                playerConnection.togglePlayPause()
                                             }
                                         }
                                         .focusRequester(focusRequester),

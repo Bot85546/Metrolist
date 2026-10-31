@@ -95,6 +95,8 @@ class DeviceConnectManager @Inject constructor(
     private var player: Player? = null
     var remoteMirrorPlayer: RemoteMirrorPlayer? = null
         private set
+    var remoteSessionPlayer: RemoteMirrorPlayer? = null
+        private set
     var onRemoteLibraryCommand: ((String) -> Unit)? = null
     var onRemoteQueue: ((String?, List<DeviceTrack>, Int) -> Unit)? = null
     var onRemoteQueueAdd: ((Boolean, List<DeviceTrack>) -> Unit)? = null
@@ -202,11 +204,17 @@ class DeviceConnectManager @Inject constructor(
         }
     }
 
+    private fun notifyRemotePlayers(previous: DevicePlaybackState?, current: DevicePlaybackState?) {
+        remoteMirrorPlayer?.notifyStateChanged(previous, current)
+        remoteSessionPlayer?.notifyStateChanged(previous, current)
+    }
+
     fun attachPlayer(target: Player) {
         if (player === target) return
         player?.removeListener(playerListener)
         player = target
         remoteMirrorPlayer = RemoteMirrorPlayer(target, this)
+        remoteSessionPlayer = RemoteMirrorPlayer(target, this, passiveMediaSession = true)
         target.addListener(playerListener)
         localQueueRevision++
         revision++
@@ -217,6 +225,7 @@ class DeviceConnectManager @Inject constructor(
         if (player !== target) return
         target.removeListener(playerListener)
         remoteMirrorPlayer = null
+        remoteSessionPlayer = null
         player = null
         revision++
         if (authenticated) {
@@ -443,7 +452,7 @@ class DeviceConnectManager @Inject constructor(
         latestRemoteRevision = -1L
         _state.value = _state.value.copy(connected = false, remotePlayback = null,
             status = "Disconnected (ready to reconnect)")
-        remoteMirrorPlayer?.notifyStateChanged(previous, null)
+        notifyRemotePlayers(previous, null)
         // No command or heartbeat traffic while disconnected; release the Nearby radio after
         // a short grace period rather than keeping an idle link alive indefinitely.
         val generation = ++suspendGeneration
@@ -703,7 +712,7 @@ class DeviceConnectManager @Inject constructor(
                     queue = if (snapshot.track == null) emptyList() else fullQueue ?: snapshot.queue,
                     queueStartIndex = if (fullQueue != null || snapshot.track == null) 0 else snapshot.queueStartIndex,
                 ))
-                remoteMirrorPlayer?.notifyStateChanged(oldSnapshot, _state.value.remotePlayback)
+                notifyRemotePlayers(oldSnapshot, _state.value.remotePlayback)
                 fulfillPeerOutputSwitchIfReady()
             }
             "MIRROR_QUEUE_BEGIN" -> {
@@ -772,7 +781,7 @@ class DeviceConnectManager @Inject constructor(
                 remoteOwnsPlayback = true
                 val pendingRemote = handoff.copy(playing = false, updatedAtMs = SystemClock.elapsedRealtime())
                 _state.value = _state.value.copy(remotePlayback = pendingRemote, status = "Switching audio output…")
-                remoteMirrorPlayer?.notifyStateChanged(prior, pendingRemote)
+                notifyRemotePlayers(prior, pendingRemote)
                 send(DeviceConnectPacket(type = "OUTPUT_TAKEOVER_READY", requestId = packet.requestId,
                     state = handoff))
             }
@@ -790,7 +799,7 @@ class DeviceConnectManager @Inject constructor(
                 val old = _state.value.remotePlayback
                 remoteOwnsPlayback = false
                 _state.value = _state.value.copy(remotePlayback = null, status = "Playing on this device")
-                remoteMirrorPlayer?.notifyStateChanged(old, null)
+                notifyRemotePlayers(old, null)
                 onRemoteOutputHandoff?.invoke(handoff, fullQueue)
             }
             "OUTPUT_TAKEOVER_REJECTED" -> {
@@ -953,7 +962,7 @@ class DeviceConnectManager @Inject constructor(
         if (old.queueRevision != pending.revision || old.queueSize != fullQueue.size || old.track == null) return
         val updated = old.copy(queue = fullQueue, queueStartIndex = 0)
         _state.value = _state.value.copy(remotePlayback = updated)
-        remoteMirrorPlayer?.notifyStateChanged(old, updated)
+        notifyRemotePlayers(old, updated)
         fulfillPeerOutputSwitchIfReady()
     }
 
@@ -1173,7 +1182,7 @@ class DeviceConnectManager @Inject constructor(
         _state.value = _state.value.copy(
             connected = false, peerName = null, remotePlayback = null, pairingRequest = null,
         )
-        remoteMirrorPlayer?.notifyStateChanged(previous, null)
+        notifyRemotePlayers(previous, null)
         scheduleReconnect()
         // Nearby may cache a failed endpoint; recover while pairing remains active.
         schedulePairingDiscoveryRetry()

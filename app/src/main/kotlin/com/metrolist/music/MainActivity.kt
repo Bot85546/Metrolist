@@ -1084,7 +1084,7 @@ class MainActivity : FragmentActivity() {
                                             }
                                             val connectSwitchDescription = stringResource(R.string.device_connect)
                                             Switch(
-                                                checked = deviceConnectUi.enabled,
+                                                checked = deviceConnectUi.enabled && deviceConnectUi.connected,
                                                 onCheckedChange = { enabled ->
                                                     deviceConnectManager.setEnabled(enabled)
                                                     if (enabled && deviceConnectUi.trustedDeviceName == null) {

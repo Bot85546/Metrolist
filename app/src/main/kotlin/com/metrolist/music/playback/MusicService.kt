@@ -734,7 +734,7 @@ class MusicService :
             deviceConnectManager.state.collect {
                 val session = mediaSession ?: return@collect
                 val desired = if (deviceConnectManager.isRemoteActive) {
-                    deviceConnectManager.remoteMirrorPlayer ?: player
+                    deviceConnectManager.remoteSessionPlayer ?: player
                 } else {
                     player
                 }
@@ -744,6 +744,12 @@ class MusicService :
                 if (deviceConnectManager.isRemoteActive) updateNotification()
                 if (deviceConnectManager.isRemoteActive && deviceConnectManager.state.value.remotePlayback?.playing == true) {
                     connectPlaybackNotificationController()
+                    // The mirrored system session is intentionally passive so Samsung Buds
+                    // stay with the actual audio output. Still keep this service alive for
+                    // remote controls when the controller's screen turns off.
+                    if (!foregroundRequestedForPlayback) {
+                        foregroundRequestedForPlayback = tryEnsureForegroundWithLatestNotification()
+                    }
                 }
             }
         }
@@ -1016,7 +1022,7 @@ class MusicService :
                 player = newPlayer
                 deviceConnectManager.attachPlayer(newPlayer)
                 if (deviceConnectManager.isRemoteActive) {
-                    deviceConnectManager.remoteMirrorPlayer?.let { mediaSession?.player = it }
+                    deviceConnectManager.remoteSessionPlayer?.let { mediaSession?.player = it }
                 }
                 _playerFlow.value = newPlayer
 
@@ -4553,7 +4559,7 @@ class MusicService :
 
         try {
             mediaSession?.let { (it as MediaSession).player =
-                if (deviceConnectManager.isRemoteActive) deviceConnectManager.remoteMirrorPlayer ?: player
+                if (deviceConnectManager.isRemoteActive) deviceConnectManager.remoteSessionPlayer ?: player
                 else player }
         } catch (e: Exception) {
             timber.log.Timber.e(e, "Failed to swap player in MediaSession")

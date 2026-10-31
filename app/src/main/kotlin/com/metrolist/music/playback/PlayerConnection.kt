@@ -443,6 +443,11 @@ class PlayerConnection(
      */
     fun togglePlayPause() {
         if (!allowInternalSync && shouldBlockPlaybackChanges?.invoke() == true) return
+        if (deviceConnectManager.isRemoteActive) {
+            val playingOnPeer = deviceConnectManager.state.value.remotePlayback?.playing == true
+            deviceConnectManager.sendCommand(if (playingOnPeer) "PAUSE" else "PLAY")
+            return
+        }
         try {
             val castHandler = service.castConnectionHandler
             if (castHandler?.isCasting?.value == true) {
@@ -463,6 +468,10 @@ class PlayerConnection(
      * Start playback - handles Cast when active
      */
     fun play() {
+        if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.sendCommand("PLAY")
+            return
+        }
         try {
             val castHandler = service.castConnectionHandler
             if (castHandler?.isCasting?.value == true) {
@@ -482,6 +491,10 @@ class PlayerConnection(
      * Pause playback - handles Cast when active
      */
     fun pause() {
+        if (deviceConnectManager.isRemoteActive) {
+            deviceConnectManager.sendCommand("PAUSE")
+            return
+        }
         try {
             val castHandler = service.castConnectionHandler
             if (castHandler?.isCasting?.value == true) {
