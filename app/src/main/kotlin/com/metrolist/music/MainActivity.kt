@@ -63,6 +63,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -86,6 +88,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -258,6 +262,9 @@ class MainActivity : FragmentActivity() {
     @Inject
     lateinit var listenTogetherManager: com.metrolist.music.listentogether.ListenTogetherManager
 
+    @Inject
+    lateinit var deviceConnectManager: com.metrolist.music.connect.DeviceConnectManager
+
     private lateinit var navController: NavHostController
     private var pendingIntent: Intent? = null
     private var latestVersionName by mutableStateOf(BuildConfig.BASE_VERSION_NAME)
@@ -278,7 +285,7 @@ class MainActivity : FragmentActivity() {
                 service: IBinder?,
             ) {
                 if (service is MusicBinder) {
-                    playerConnection = PlayerConnection(this@MainActivity, service, database, lifecycleScope)
+                    playerConnection = PlayerConnection(this@MainActivity, service, database, lifecycleScope, deviceConnectManager)
                     playerConnectionSnapshot = playerConnection
                     listenTogetherManager.setPlayerConnection(playerConnection)
                 }
@@ -310,6 +317,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onStart() {
         super.onStart()
+        deviceConnectManager.setForeground(true)
         // Request notification permission on Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -329,9 +337,10 @@ class MainActivity : FragmentActivity() {
     }
 
     override fun onStop() {
+        deviceConnectManager.setForeground(false)
         // Only keep an off-screen binding when playback is active/starting, or
         // Listen Together needs to monitor the player while the UI is backgrounded.
-        if (!listenTogetherManager.isInRoom &&
+        if (!listenTogetherManager.isInRoom && !deviceConnectManager.isRemoteActive &&
             playerConnection?.service?.hasActivePlaybackIntent() != true
         ) {
             // The service keeps an additional controller only while music is
@@ -352,7 +361,8 @@ class MainActivity : FragmentActivity() {
             listenTogetherManager.disconnect()
         }
         super.onDestroy()
-        val stopServiceOnClear = dataStore.get(StopMusicOnTaskClearKey, false) && isFinishing
+        val stopServiceOnClear = dataStore.get(StopMusicOnTaskClearKey, false) &&
+            isFinishing && !deviceConnectManager.isRemoteActive
 
         // Full cleanup - only on actual destroy
         playerConnection?.dispose()
@@ -847,6 +857,9 @@ class MainActivity : FragmentActivity() {
                         ?: remember { mutableStateOf(false) }
                 val playerReady by playerReadyState
                 val activePlayerConnection = if (playerReady) playerConnection else null
+                val deviceConnectUi by deviceConnectManager.state.collectAsStateWithLifecycle()
+                val isRemoteMirror = deviceConnectManager.isRemoteActive
+                val activeTrackId = activePlayerConnection?.mediaMetadata?.collectAsStateWithLifecycle()?.value?.id
 
                 val playerAwareWindowInsets =
                     remember(
@@ -911,7 +924,16 @@ class MainActivity : FragmentActivity() {
                     }
                 }
 
-                LaunchedEffect(activePlayerConnection) {
+                LaunchedEffect(activePlayerConnection, isRemoteMirror, activeTrackId,
+                    deviceConnectUi.remotePlayback?.track?.id) {
+                    if (isRemoteMirror) {
+                        if (deviceConnectUi.remotePlayback?.track == null) {
+                            if (!playerBottomSheetState.isDismissed) playerBottomSheetState.dismiss()
+                            return@LaunchedEffect
+                        }
+                        if (playerBottomSheetState.isDismissed) playerBottomSheetState.collapseSoft()
+                        return@LaunchedEffect
+                    }
                     val player = runCatching { activePlayerConnection?.player }.getOrNull()
                     if (player?.currentMediaItem == null) {
                         if (!playerBottomSheetState.isDismissed) {
@@ -1021,6 +1043,7 @@ class MainActivity : FragmentActivity() {
                     LocalShimmerTheme provides ShimmerTheme,
                     LocalSyncUtils provides syncUtils,
                     LocalListenTogetherManager provides listenTogetherManager,
+                    LocalDeviceConnectManager provides deviceConnectManager,
                     LocalChangelogState provides showChangelog,
                     LocalArtistNameAliases provides artistNameAliases,
                 ) {
@@ -1059,14 +1082,36 @@ class MainActivity : FragmentActivity() {
                                                     contentDescription = stringResource(R.string.stats),
                                                 )
                                             }
-                                            if (listenTogetherInTopBar) {
-                                                IconButton(onClick = { navController.navigate("listen_together_from_topbar") }) {
+                                            val connectSwitchDescription = stringResource(R.string.device_connect)
+                                            Switch(
+                                                checked = deviceConnectUi.enabled && deviceConnectUi.connected,
+                                                onCheckedChange = { enabled ->
+                                                    deviceConnectManager.setEnabled(enabled)
+                                                    if (enabled && deviceConnectUi.trustedDeviceName == null) {
+                                                        navController.navigate("settings/device_connect")
+                                                    }
+                                                },
+                                                modifier = Modifier
+                                                    .padding(horizontal = 2.dp)
+                                                    .semantics { contentDescription = connectSwitchDescription },
+                                                colors = SwitchDefaults.colors(
+                                                    checkedThumbColor = Color.White,
+                                                    checkedTrackColor = Color(0xFF3B82F6),
+                                                    checkedBorderColor = Color.Transparent,
+                                                    checkedIconColor = Color(0xFF3B82F6),
+                                                    uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                                                    uncheckedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                                                    uncheckedIconColor = MaterialTheme.colorScheme.surface,
+                                                ),
+                                                thumbContent = {
                                                     Icon(
-                                                        painter = painterResource(R.drawable.group_outlined),
-                                                        contentDescription = stringResource(R.string.together),
+                                                        painter = painterResource(R.drawable.link),
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(16.dp),
                                                     )
-                                                }
-                                            }
+                                                },
+                                            )
                                             IconButton(onClick = { showAccountDialog = true }) {
                                                 BadgedBox(badge = {
                                                     if (latestVersionName != BuildConfig.BASE_VERSION_NAME) {
@@ -1663,6 +1708,7 @@ val LocalPlayerAwareWindowInsets = compositionLocalOf<WindowInsets> { error("No 
 val LocalDownloadUtil = staticCompositionLocalOf<DownloadUtil> { error("No DownloadUtil provided") }
 val LocalSyncUtils = staticCompositionLocalOf<SyncUtils> { error("No SyncUtils provided") }
 val LocalListenTogetherManager = staticCompositionLocalOf<com.metrolist.music.listentogether.ListenTogetherManager?> { null }
+val LocalDeviceConnectManager = staticCompositionLocalOf<com.metrolist.music.connect.DeviceConnectManager?> { null }
 val LocalChangelogState = staticCompositionLocalOf<MutableState<Boolean>> { error("No LocalChangelogState provided") }
 val LocalArtistNameAliases = staticCompositionLocalOf<Map<String, String>> { emptyMap() }
 val LocalIsPlayerExpanded = compositionLocalOf { false }

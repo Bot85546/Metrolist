@@ -22,6 +22,7 @@ class SleepTimer(
     private val scope: CoroutineScope,
     var player: Player,
     private val onVolumeMultiplierChanged: (Float) -> Unit = {},
+    private val onTimerChanged: () -> Unit = {},
 ) : Player.Listener {
     private companion object {
         private const val TIMER_TICK_MS = 1000L
@@ -85,6 +86,7 @@ class SleepTimer(
                                 if (stopAfterCurrentSongOnTimeout) {
                                     pauseWhenSongEnd = true
                                     stopAfterCurrentSongOnTimeout = false
+                                    onTimerChanged()
                                     if (!fadeOutEnabled) {
                                         break
                                     }
@@ -103,6 +105,7 @@ class SleepTimer(
                     }
                 }
         }
+        onTimerChanged()
     }
 
     /**
@@ -124,6 +127,7 @@ class SleepTimer(
         fadeOutEnabled = false
         triggerTime = -1L
         updateVolumeMultiplier(1f)
+        onTimerChanged()
     }
 
     override fun onMediaItemTransition(
@@ -152,6 +156,7 @@ class SleepTimer(
         triggerTime = -1L
         updateVolumeMultiplier(1f)
         player.pause()
+        onTimerChanged()
     }
 
     private fun updateVolumeMultiplierForRemainingTime(remainingMs: Long) {
