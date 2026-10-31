@@ -1,4 +1,4 @@
-name: Build Metrolitt APK
+name: Build Metrolitt Device Connect Preview
 
 on:
   pull_request:
@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   build:
-    name: Metrolitt Android APK
+    name: Metrolitt Device Connect Preview APK
     runs-on: ubuntu-latest
     timeout-minutes: 35
 
@@ -72,8 +72,10 @@ jobs:
         run: ./gradlew --console=plain testGmsDebugUnitTest :app:assembleFossDebug assembleGmsRelease --warning-mode summary
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
-          METROLIST_APPLICATION_ID: com.metrolitt.music
-          METROLIST_APP_NAME: Metrolitt
+          # A separate package prevents experimental builds from replacing or
+          # changing the installed production app or its data.
+          METROLIST_APPLICATION_ID: com.metrolitt.music.deviceconnect.preview
+          METROLIST_APP_NAME: Metrolitt Connect Preview
           METROLIST_DEBUG_KEYSTORE_PATH: pr-debug.keystore
           METROLIST_BUILD_COMMIT: ${{ github.sha }}
           PULL_REQUEST: "true"
@@ -92,22 +94,22 @@ jobs:
             ls -la app/build/outputs/apk/gms/release
             exit 1
           fi
-          "$BUILD_TOOLS/zipalign" -p -f 4 "$UNSIGNED_APK" Metrolitt-aligned.apk
+          "$BUILD_TOOLS/zipalign" -p -f 4 "$UNSIGNED_APK" Metrolitt-Connect-Preview-aligned.apk
           "$BUILD_TOOLS/apksigner" sign \
             --ks app/pr-debug.keystore \
             --ks-key-alias androiddebugkey \
             --ks-pass pass:android \
             --key-pass pass:android \
-            --out Metrolitt.apk \
-            Metrolitt-aligned.apk
-          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs Metrolitt.apk
-          unzip -t Metrolitt.apk | tail -1
+            --out Metrolitt-Connect-Preview.apk \
+            Metrolitt-Connect-Preview-aligned.apk
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs Metrolitt-Connect-Preview.apk
+          unzip -t Metrolitt-Connect-Preview.apk | tail -1
 
-      - name: Upload optimized Metrolitt APK
+      - name: Upload optimized Device Connect preview APK
         uses: actions/upload-artifact@v7
         with:
-          name: Metrolitt-Optimized-APK
-          path: Metrolitt.apk
+          name: Metrolitt-Device-Connect-Preview-APK
+          path: Metrolitt-Connect-Preview.apk
           archive: false
           if-no-files-found: error
 

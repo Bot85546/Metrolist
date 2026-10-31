@@ -160,6 +160,7 @@ import com.metrolist.music.extensions.metadata
 import com.metrolist.music.extensions.setOffloadEnabled
 import com.metrolist.music.extensions.toEnum
 import com.metrolist.music.extensions.toMediaItem
+import com.metrolist.music.connect.asMediaItem
 import com.metrolist.music.extensions.toPersistQueue
 import com.metrolist.music.extensions.toQueue
 import com.metrolist.music.lyrics.LyricsHelper
@@ -259,6 +260,9 @@ class MusicService :
 
     @Inject
     lateinit var listenTogetherManager: com.metrolist.music.listentogether.ListenTogetherManager
+
+    @Inject
+    lateinit var deviceConnectManager: com.metrolist.music.connect.DeviceConnectManager
 
     private lateinit var audioManager: AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
@@ -599,13 +603,67 @@ class MusicService :
         )
         player = createExoPlayer(prefs = startupPrefs!!)
         player.addListener(this@MusicService)
-        sleepTimer =
-            SleepTimer(scope, player) { multiplier ->
-                sleepTimerVolumeMultiplier.value = multiplier
-            }
+        sleepTimer = SleepTimer(
+            scope, player,
+            onVolumeMultiplierChanged = { multiplier -> sleepTimerVolumeMultiplier.value = multiplier },
+            onTimerChanged = { deviceConnectManager.refreshSnapshot() },
+        )
         player.addListener(sleepTimer!!)
 
         playerInitialized.value = true
+        deviceConnectManager.attachPlayer(player)
+        deviceConnectManager.queueTitleProvider = { queueTitle }
+        deviceConnectManager.sleepTimerProvider = {
+            sleepTimer?.let { timer ->
+                com.metrolist.music.connect.DeviceSleepTimerSnapshot(
+                    remainingMs = timer.triggerTime.takeIf { it >= 0L }
+                        ?.let { (it - System.currentTimeMillis()).coerceAtLeast(0L) } ?: -1L,
+                    afterSong = timer.pauseWhenSongEnd,
+                    stopAfterSong = timer.stopAfterCurrentSongOnTimeout,
+                    fadeOut = timer.fadeOutEnabled,
+                )
+            } ?: com.metrolist.music.connect.DeviceSleepTimerSnapshot()
+        }
+        deviceConnectManager.volumeProvider = {
+            if (::playerVolume.isInitialized) playerVolume.value else 1f
+        }
+        deviceConnectManager.mutedProvider = { isMuted.value }
+        deviceConnectManager.likedProvider = {
+            currentSong.value?.song?.let { if (it.isEpisode) it.inLibrary != null else it.liked }
+        }
+        deviceConnectManager.onRemoteStopCommand = { clearAutomix() }
+        deviceConnectManager.onRemoteOutputReleased = {
+            clearAutomix()
+            sleepTimer?.clear()
+        }
+        deviceConnectManager.onRemoteOutputHandoff = { handoff, orderedTracks ->
+            val start = orderedTracks.indexOfFirst { it.sourceIndex == handoff.queueIndex }
+            if (start >= 0 && orderedTracks.isNotEmpty()) {
+                clearAutomix()
+                // Output switching is intentionally a paused handoff. Never let an old
+                // playWhenReady flag start the new device's speaker before Buds connect.
+                player.pause()
+                val mediaItems = orderedTracks.map { it.asMediaItem(0L) }
+                player.setMediaItems(mediaItems, start, handoff.positionMs.coerceAtLeast(0L))
+                queueTitle = handoff.queueTitle
+                player.repeatMode = handoff.repeatMode
+                player.shuffleModeEnabled = handoff.shuffle
+                if (handoff.shuffle) {
+                    // The incoming playlist is already ordered as heard. Keep that order
+                    // while retaining the visible shuffle state on the new audio owner.
+                    player.setShuffleOrder(DefaultShuffleOrder(IntArray(mediaItems.size) { it }, System.currentTimeMillis()))
+                }
+                player.playbackParameters = androidx.media3.common.PlaybackParameters(handoff.speed, handoff.pitch)
+                sleepTimer?.clear()
+                if (handoff.sleepTimerAfterSong) {
+                    sleepTimer?.start(-1, handoff.sleepTimerStopAfterSong, handoff.sleepTimerFadeOut)
+                } else if (handoff.sleepTimerRemainingMs > 0L) {
+                    val minutes = ((handoff.sleepTimerRemainingMs + 59_999L) / 60_000L).toInt().coerceIn(1, 120)
+                    sleepTimer?.start(minutes, handoff.sleepTimerStopAfterSong, handoff.sleepTimerFadeOut)
+                }
+                player.prepare()
+            }
+        }
         Timber.tag(TAG).d("Player successfully initialized")
 
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -613,10 +671,22 @@ class MusicService :
 
         mediaLibrarySessionCallback.apply {
             service = this@MusicService
-            toggleLike = ::toggleLike
-            toggleStartRadio = ::toggleStartRadio
-            toggleLibrary = ::toggleLibrary
-            addToTargetPlaylist = ::addToTargetPlaylist
+            toggleLike = {
+                if (deviceConnectManager.isRemoteActive) deviceConnectManager.sendCommand("TOGGLE_LIKE")
+                else this@MusicService.toggleLike()
+            }
+            toggleStartRadio = {
+                if (deviceConnectManager.isRemoteActive) deviceConnectManager.sendCommand("START_RADIO")
+                else this@MusicService.toggleStartRadio()
+            }
+            toggleLibrary = {
+                if (deviceConnectManager.isRemoteActive) deviceConnectManager.sendCommand("TOGGLE_LIBRARY")
+                else this@MusicService.toggleLibrary()
+            }
+            addToTargetPlaylist = {
+                if (deviceConnectManager.isRemoteActive) deviceConnectManager.sendCommand("ADD_TO_TARGET_PLAYLIST")
+                else this@MusicService.addToTargetPlaylist()
+            }
         }
         mediaSession =
             MediaLibrarySession
@@ -630,6 +700,61 @@ class MusicService :
                     ),
                 ).setBitmapLoader(sessionArtworkLoader)
                 .build()
+        deviceConnectManager.onRemoteLibraryCommand = { action ->
+            when (action) {
+                "TOGGLE_LIKE" -> toggleLike()
+                "TOGGLE_LIBRARY" -> toggleLibrary()
+                "START_RADIO" -> toggleStartRadio()
+                "ADD_TO_TARGET_PLAYLIST" -> addToTargetPlaylist()
+            }
+        }
+        deviceConnectManager.onRemoteSleepTimerCommand = { minutes, stopAfterSong, fadeOut ->
+            if (minutes == 0) sleepTimer?.clear()
+            else sleepTimer?.start(minutes, stopAfterSong, fadeOut)
+            deviceConnectManager.refreshSnapshot()
+        }
+        deviceConnectManager.onRemoteVolumeCommand = { volume ->
+            if (::playerVolume.isInitialized) playerVolume.value = volume
+            deviceConnectManager.refreshSnapshot()
+        }
+        deviceConnectManager.onRemoteMuteCommand = {
+            toggleMute()
+            deviceConnectManager.refreshSnapshot()
+        }
+        deviceConnectManager.onRemoteQueue = { title, tracks, startIndex ->
+            if (!deviceConnectManager.isRemoteActive && tracks.isNotEmpty()) {
+                playQueue(ListQueue(title = title, items = tracks.map { it.asMediaItem(0L) }, startIndex = startIndex))
+            }
+        }
+        deviceConnectManager.onRemoteQueueAdd = { next, tracks ->
+            if (!deviceConnectManager.isRemoteActive && tracks.isNotEmpty()) {
+                val items = tracks.map { it.asMediaItem(0L) }
+                if (next) playNext(items) else addToQueue(items)
+            }
+        }
+        scope.launch {
+            deviceConnectManager.state.collect {
+                val session = mediaSession ?: return@collect
+                val desired = if (deviceConnectManager.isRemoteActive) {
+                    deviceConnectManager.remoteSessionPlayer ?: player
+                } else {
+                    player
+                }
+                if (session.player !== desired) {
+                    session.player = desired
+                }
+                if (deviceConnectManager.isRemoteActive) updateNotification()
+                if (deviceConnectManager.isRemoteActive && deviceConnectManager.state.value.remotePlayback?.playing == true) {
+                    connectPlaybackNotificationController()
+                    // The mirrored system session is intentionally passive so Samsung Buds
+                    // stay with the actual audio output. Still keep this service alive for
+                    // remote controls when the controller's screen turns off.
+                    if (!foregroundRequestedForPlayback) {
+                        foregroundRequestedForPlayback = tryEnsureForegroundWithLatestNotification()
+                    }
+                }
+            }
+        }
         player.repeatMode = startupPrefs!![RepeatModeKey] ?: REPEAT_MODE_OFF
 
         if (startupPrefs!![RememberShuffleAndRepeatKey] ?: true) {
@@ -653,6 +778,10 @@ class MusicService :
             else com.metrolist.music.constants.AudioQuality.entries.find { it.name == value }
         } ?: com.metrolist.music.constants.AudioQuality.AUTO
         playerVolume = MutableStateFlow((startupPrefs!![PlayerVolumeKey] ?: 1f).coerceIn(0f, 1f))
+        playerVolume.collectLatest(scope) {
+            delay(140L) // One small state update after a slider drag burst.
+            deviceConnectManager.refreshSnapshot()
+        }
 
         initializeCast()
 
@@ -750,6 +879,7 @@ class MusicService :
         currentSong.debounce(1000).collect(scope) { song ->
             updateNotification()
             updateWidgetUI(player.isPlaying)
+            deviceConnectManager.refreshSnapshot()
         }
 
         combine(
@@ -892,6 +1022,10 @@ class MusicService :
                 newPlayer.prepare()
 
                 player = newPlayer
+                deviceConnectManager.attachPlayer(newPlayer)
+                if (deviceConnectManager.isRemoteActive) {
+                    deviceConnectManager.remoteSessionPlayer?.let { mediaSession?.player = it }
+                }
                 _playerFlow.value = newPlayer
 
                 Timber.tag("MusicService").i("Player recreated with AudioTrackPlaybackParams: $useAudioTrackParams")
@@ -1348,33 +1482,38 @@ class MusicService :
     }
 
     private fun updateNotification(isLiked: Boolean? = currentSong.value?.song?.let { if (it.isEpisode) it.inLibrary != null else it.liked }) {
+        val remote = deviceConnectManager.state.value.remotePlayback.takeIf { deviceConnectManager.isRemoteActive }
+        val liked = remote?.liked ?: isLiked
+        val shuffleEnabled = remote?.shuffle ?: player.shuffleModeEnabled
+        val activeRepeatMode = remote?.repeatMode ?: player.repeatMode
+        val hasSong = if (remote != null) remote.track != null else currentSong.value != null
         mediaSession?.setCustomLayout(
             listOf(
                 CommandButton
                     .Builder()
-                    .setDisplayName(getString(if (player.shuffleModeEnabled) R.string.action_shuffle_off else R.string.action_shuffle_on))
-                    .setIconResId(if (player.shuffleModeEnabled) R.drawable.shuffle_on else R.drawable.shuffle)
+                    .setDisplayName(getString(if (shuffleEnabled) R.string.action_shuffle_off else R.string.action_shuffle_on))
+                    .setIconResId(if (shuffleEnabled) R.drawable.shuffle_on else R.drawable.shuffle)
                     .setSessionCommand(CommandToggleShuffle)
                     .build(),
                 CommandButton
                     .Builder()
                     .setDisplayName(
                         getString(
-                            if (isLiked == true) {
+                            if (liked == true) {
                                 R.string.action_remove_like
                             } else {
                                 R.string.action_like
                             },
                         ),
-                    ).setIconResId(if (isLiked == true) R.drawable.ic_heart else R.drawable.ic_heart_outline)
+                    ).setIconResId(if (liked == true) R.drawable.ic_heart else R.drawable.ic_heart_outline)
                     .setSessionCommand(CommandToggleLike)
-                    .setEnabled(currentSong.value != null)
+                    .setEnabled(hasSong)
                     .build(),
                 CommandButton
                     .Builder()
                     .setDisplayName(
                         getString(
-                            when (player.repeatMode) {
+                            when (activeRepeatMode) {
                                 REPEAT_MODE_OFF -> R.string.repeat_mode_off
                                 REPEAT_MODE_ONE -> R.string.repeat_mode_one
                                 REPEAT_MODE_ALL -> R.string.repeat_mode_all
@@ -1382,7 +1521,7 @@ class MusicService :
                             },
                         ),
                     ).setIconResId(
-                        when (player.repeatMode) {
+                        when (activeRepeatMode) {
                             REPEAT_MODE_OFF -> R.drawable.repeat
                             REPEAT_MODE_ONE -> R.drawable.repeat_one_on
                             REPEAT_MODE_ALL -> R.drawable.repeat_on
@@ -1395,14 +1534,14 @@ class MusicService :
                     .setDisplayName(getString(R.string.start_radio))
                     .setIconResId(R.drawable.radio)
                     .setSessionCommand(CommandToggleStartRadio)
-                    .setEnabled(currentSong.value != null)
+                    .setEnabled(hasSong)
                     .build(),
                 CommandButton
                     .Builder()
                     .setDisplayName(getString(R.string.android_auto_target_playlist))
                     .setIconResId(R.drawable.playlist_add)
                     .setSessionCommand(CommandAddToTargetPlaylist)
-                    .setEnabled(currentSong.value != null)
+                    .setEnabled(hasSong)
                     .build(),
             ),
         )
@@ -1538,6 +1677,16 @@ class MusicService :
         restoringQueue: Boolean = false,
     ) {
         if (taskCleared) return
+        if (deviceConnectManager.isRemoteActive) {
+            // Some entry points (widgets, media controllers and restored navigation)
+            // bypass PlayerConnection. They must never start a second local stream.
+            scope.launch {
+                runCatching { withContext(Dispatchers.IO) { queue.getInitialStatus() } }
+                    .onSuccess(deviceConnectManager::submitRemoteQueue)
+                    .onFailure { Timber.tag(TAG).w(it, "Could not forward selected queue to remote owner") }
+            }
+            return
+        }
         if (!playerInitialized.value) {
             Timber.tag(TAG).w("playQueue called before player initialization, queuing request")
             scope.launch {
@@ -3743,7 +3892,8 @@ class MusicService :
      */
     fun hasActivePlaybackIntent(): Boolean {
         if (!::player.isInitialized) return false
-        return (player.playWhenReady && player.playbackState != Player.STATE_ENDED) ||
+        return deviceConnectManager.isRemoteActive ||
+            (player.playWhenReady && player.playbackState != Player.STATE_ENDED) ||
             castConnectionHandler?.isCasting?.value == true
     }
 
@@ -3801,6 +3951,18 @@ class MusicService :
     }
 
     override fun onDestroy() {
+        deviceConnectManager.onRemoteLibraryCommand = null
+        deviceConnectManager.onRemoteQueue = null
+        deviceConnectManager.onRemoteQueueAdd = null
+        deviceConnectManager.queueTitleProvider = null
+        deviceConnectManager.sleepTimerProvider = null
+        deviceConnectManager.volumeProvider = null
+        deviceConnectManager.mutedProvider = null
+        deviceConnectManager.onRemoteSleepTimerCommand = null
+        deviceConnectManager.onRemoteOutputReleased = null
+        deviceConnectManager.onRemoteOutputHandoff = null
+        deviceConnectManager.onRemoteVolumeCommand = null
+        deviceConnectManager.onRemoteMuteCommand = null
         isRunning = false
 
         if (!::player.isInitialized) {
@@ -3812,6 +3974,8 @@ class MusicService :
             shutdownDeferred.complete(Unit)
             return
         }
+
+        deviceConnectManager.detachPlayer(player)
 
         val currentMetadata = player.currentMediaItem?.metadata
         if (currentMetadata?.isEpisode == true && player.currentPosition > 0) {
@@ -3865,7 +4029,7 @@ class MusicService :
         }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        if (dataStore.get(StopMusicOnTaskClearKey, false)) {
+        if (dataStore.get(StopMusicOnTaskClearKey, false) && !deviceConnectManager.isRemoteActive) {
             stopOnTaskClear()
         } else {
             super.onTaskRemoved(rootIntent)
@@ -3922,7 +4086,13 @@ class MusicService :
     ) {
         if (taskCleared) return
         try {
-            super.onUpdateNotification(session, startInForegroundRequired)
+            // Android normally drops a paused session's notification after a period of
+            // inactivity. Our controller's platform session is intentionally passive to
+            // prevent Samsung Buds switching, even while the other device is playing.
+            val peerIsPlaying = ::deviceConnectManager.isInitialized &&
+                deviceConnectManager.isRemoteActive &&
+                deviceConnectManager.state.value.remotePlayback?.playing == true
+            super.onUpdateNotification(session, startInForegroundRequired || peerIsPlaying)
         } catch (e: ForegroundServiceStartNotAllowedException) {
             handleForegroundServiceStartNotAllowed(e)
         } catch (e: IllegalStateException) {
@@ -4358,6 +4528,7 @@ class MusicService :
 
         fadingPlayer = currentPlayer
         player = nextPlayer
+        deviceConnectManager.attachPlayer(nextPlayer)
         _playerFlow.value = player
         secondaryPlayer = null
 
@@ -4395,7 +4566,9 @@ class MusicService :
         sleepTimer?.player = player
 
         try {
-            mediaSession?.let { (it as MediaSession).player = player }
+            mediaSession?.let { (it as MediaSession).player =
+                if (deviceConnectManager.isRemoteActive) deviceConnectManager.remoteSessionPlayer ?: player
+                else player }
         } catch (e: Exception) {
             timber.log.Timber.e(e, "Failed to swap player in MediaSession")
         }
