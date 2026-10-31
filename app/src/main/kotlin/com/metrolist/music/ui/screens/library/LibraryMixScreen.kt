@@ -103,6 +103,7 @@ import com.metrolist.music.ui.menu.AlbumMenu
 import com.metrolist.music.ui.menu.ArtistMenu
 import com.metrolist.music.ui.menu.PlaylistMenu
 import com.metrolist.music.ui.menu.SongMenu
+import com.metrolist.music.utils.isYouTubeSystemPlaylist
 import com.metrolist.music.utils.rememberEnumPreference
 import com.metrolist.music.utils.rememberPreference
 import com.metrolist.music.viewmodels.LibraryMixViewModel
@@ -252,7 +253,9 @@ fun LibraryMixScreen(
         }
     }
     val allItems = remember(savedPlaylists, sortType, sortDescending, collator) {
-        val youtubePlaylists = savedPlaylists.filter { it.playlist.browseId != null }
+        val youtubePlaylists = savedPlaylists.filter {
+            it.playlist.browseId != null && !isYouTubeSystemPlaylist(it.playlist.browseId)
+        }
         when (sortType) {
             MixSortType.CREATE_DATE -> youtubePlaylists.sortedBy { it.playlist.createdAt }
             MixSortType.NAME -> youtubePlaylists.sortedWith(compareBy(collator) { it.playlist.name })
