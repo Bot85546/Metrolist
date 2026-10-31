@@ -2,6 +2,7 @@ package com.metrolist.music.connect
 
 import android.os.SystemClock
 import androidx.media3.common.C
+import androidx.media3.common.DeviceInfo
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -142,8 +143,17 @@ class RemoteMirrorPlayer(
 
     override fun getAvailableCommands(): Player.Commands = remoteCommands
 
-    // Preserve the controller's Android output route and hardware-volume keys. Remote
-    // playback metadata must not advertise a second, synthetic volume device.
+    // The actual audio is rendered by the paired device, not this controller's ExoPlayer.
+    // Advertising LOCAL playback here makes Android (and Samsung Buds Auto Switch) see
+    // two devices playing music and can steal the earbuds from the real output device.
+    // No MediaRouter routingControllerId is set: this is an app-managed remote session,
+    // not a new Bluetooth/output route. Volume commands still target this device's
+    // existing local player; they never change the paired device's hardware volume.
+    override fun getDeviceInfo(): DeviceInfo = REMOTE_DEVICE_INFO
+
+    private companion object {
+        val REMOTE_DEVICE_INFO = DeviceInfo.Builder(DeviceInfo.PLAYBACK_TYPE_REMOTE).build()
+    }
 
     override fun getPlaybackParameters(): PlaybackParameters = PlaybackParameters(
         remote?.speed ?: 1f,
