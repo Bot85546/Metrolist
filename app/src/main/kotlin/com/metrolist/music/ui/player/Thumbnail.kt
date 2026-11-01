@@ -12,7 +12,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,13 +27,12 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
@@ -43,13 +41,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,11 +68,9 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import coil3.compose.AsyncImage
-import coil3.imageLoader
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import com.metrolist.music.LocalListenTogetherManager
-import com.metrolist.music.LocalDeviceConnectManager
 import com.metrolist.music.LocalPlayerConnection
 import com.metrolist.music.R
 import com.metrolist.music.constants.CropAlbumArtKey
@@ -94,7 +87,6 @@ import com.metrolist.music.ui.component.CastButton
 import com.metrolist.music.utils.rememberEnumPreference
 import com.metrolist.music.utils.rememberPreference
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collect
 
 /**
  * Pre-calculated thumbnail dimensions to avoid repeated calculations during recomposition.
@@ -154,20 +146,30 @@ private fun getMediaItems(
     swipeThumbnail: Boolean
 ): MediaItemsData {
     val timeline = player.currentTimeline
+    val currentIndex = player.currentMediaItemIndex
+    val shuffleModeEnabled = player.shuffleModeEnabled
     
     val currentMediaItem = try {
         player.currentMediaItem
     } catch (e: Exception) { null }
     
     val previousMediaItem = if (swipeThumbnail && !timeline.isEmpty) {
-        val previousIndex = player.previousMediaItemIndex
+        val previousIndex = timeline.getPreviousWindowIndex(
+            currentIndex,
+            Player.REPEAT_MODE_OFF,
+            shuffleModeEnabled
+        )
         if (previousIndex != C.INDEX_UNSET) {
             try { player.getMediaItemAt(previousIndex) } catch (e: Exception) { null }
         } else null
     } else null
 
     val nextMediaItem = if (swipeThumbnail && !timeline.isEmpty) {
-        val nextIndex = player.nextMediaItemIndex
+        val nextIndex = timeline.getNextWindowIndex(
+            currentIndex,
+            Player.REPEAT_MODE_OFF,
+            shuffleModeEnabled
+        )
         if (nextIndex != C.INDEX_UNSET) {
             try { player.getMediaItemAt(nextIndex) } catch (e: Exception) { null }
         } else null
@@ -212,7 +214,6 @@ fun Thumbnail(
     val queueTitle by playerConnection.queueTitle.collectAsStateWithLifecycle()
     val canSkipPrevious by playerConnection.canSkipPrevious.collectAsStateWithLifecycle()
     val canSkipNext by playerConnection.canSkipNext.collectAsStateWithLifecycle()
-    val queueWindows by playerConnection.queueWindows.collectAsState()
 
     // Preferences - computed once
     // Disable swipe for Listen Together guests
@@ -235,7 +236,6 @@ fun Thumbnail(
     val mediaItemsData by remember(
         playerConnection.player.currentMediaItemIndex,
         playerConnection.player.shuffleModeEnabled,
-        queueWindows,
         swipeThumbnail,
         mediaMetadata
     ) {
@@ -246,27 +246,6 @@ fun Thumbnail(
     
     val mediaItems = mediaItemsData.items
     val currentMediaIndex = mediaItemsData.currentIndex
-
-    val nextArtwork = mediaItems.getOrNull(currentMediaIndex + 1)
-        ?.mediaMetadata?.artworkUri?.toString()?.let { playerArtworkUrl(it, false) }
-    val isRemoteController = LocalDeviceConnectManager.current?.isRemoteActive == true
-    // Warm only the next small cover on the remote controller. No extra image work is
-    // needed on the device actually playing audio, and the full-size cover stays on demand.
-    LaunchedEffect(nextArtwork, isRemoteController) {
-        if (isRemoteController && !nextArtwork.isNullOrBlank()) {
-            runCatching {
-                context.imageLoader.execute(
-                    ImageRequest.Builder(context)
-                        .data(nextArtwork)
-                        .size(200, 200)
-                        .memoryCachePolicy(CachePolicy.ENABLED)
-                        .diskCachePolicy(CachePolicy.ENABLED)
-                        .networkCachePolicy(CachePolicy.ENABLED)
-                        .build()
-                )
-            }
-        }
-    }
 
     // Snap behavior - created once per grid state
     val thumbnailSnapLayoutInfoProvider = remember(thumbnailLazyGridState) {
@@ -281,29 +260,16 @@ fun Thumbnail(
 
     // Current item tracking - derived state for efficiency
     val currentItem by remember { derivedStateOf { thumbnailLazyGridState.firstVisibleItemIndex } }
-    val isDragged by thumbnailLazyGridState.interactionSource.collectIsDraggedAsState()
-    val currentMediaIndexState by rememberUpdatedState(currentMediaIndex)
-    val canSkipNextState by rememberUpdatedState(canSkipNext)
-    val canSkipPreviousState by rememberUpdatedState(canSkipPrevious)
+    val itemScrollOffset by remember { derivedStateOf { thumbnailLazyGridState.firstVisibleItemScrollOffset } }
 
-    // Dispatch only after an actual drag settles. The old offset-based callback often ran
-    // while the scroll was still moving and missed the final snap on remote controllers.
-    LaunchedEffect(thumbnailLazyGridState, swipeThumbnail) {
-        var userSwiped = false
-        snapshotFlow {
-            Triple(isDragged, thumbnailLazyGridState.isScrollInProgress,
-                thumbnailLazyGridState.firstVisibleItemIndex)
-        }.collect { (dragging, scrolling, selectedIndex) ->
-            if (dragging) userSwiped = true
-            if (userSwiped && !scrolling) {
-                userSwiped = false
-                if (swipeThumbnail && currentMediaIndexState >= 0) {
-                    when {
-                        selectedIndex > currentMediaIndexState && canSkipNextState -> playerConnection.seekToNext()
-                        selectedIndex < currentMediaIndexState && canSkipPreviousState -> playerConnection.seekToPrevious()
-                    }
-                }
-            }
+    // Handle swipe to change song
+    LaunchedEffect(itemScrollOffset) {
+        if (!thumbnailLazyGridState.isScrollInProgress || !swipeThumbnail || itemScrollOffset != 0 || currentMediaIndex < 0) return@LaunchedEffect
+
+        if (currentItem > currentMediaIndex && canSkipNext) {
+            playerConnection.player.seekToNext()
+        } else if (currentItem < currentMediaIndex && canSkipPrevious) {
+            playerConnection.player.seekToPreviousMediaItem()
         }
     }
 
@@ -419,13 +385,12 @@ fun Thumbnail(
                             Modifier.fillMaxSize()
                         }
                     ) {
-                        itemsIndexed(
+                        items(
                             items = mediaItems,
-                            key = { index, item ->
-                                // A track can occur in more than one adjacent queue position.
-                                "thumbnail_$index:${item.mediaId}"
+                            key = { item -> 
+                                item.mediaId.ifEmpty { "unknown_${item.hashCode()}" }
                             }
-                        ) { index, item ->
+                        ) { item ->
                             ThumbnailItem(
                                 item = item,
                                 dimensions = dimensions,
@@ -438,7 +403,7 @@ fun Thumbnail(
                                 context = context,
                                 isLandscape = isLandscape,
                                 isListenTogetherGuest = isListenTogetherGuest,
-                                isCurrentSong = index == currentMediaIndex,
+                                currentMediaId = mediaMetadata?.id,
                                 currentMediaThumbnail = mediaMetadata?.thumbnailUrl
                             )
                         }
@@ -476,14 +441,6 @@ private fun ThumbnailHeader(
     textColor: Color,
     modifier: Modifier = Modifier
 ) {
-    val connectManager = LocalDeviceConnectManager.current
-    val connectState by connectManager?.state?.collectAsStateWithLifecycle()
-        ?: remember { mutableStateOf(com.metrolist.music.connect.DeviceConnectUiState()) }
-    val remoteName = if (connectManager?.isRemoteActive == true) {
-        connectState.peerName ?: connectState.trustedDeviceName
-    } else null
-    val peerName = connectState.peerName ?: connectState.trustedDeviceName
-    val canSendOutputToPeer = connectManager?.canSwitchOutputToPeer == true && peerName != null
     val listenTogetherManager = LocalListenTogetherManager.current
     val listenTogetherRoleState = listenTogetherManager?.role?.collectAsStateWithLifecycle(initialValue = RoomRole.NONE)
     val isListenTogetherGuest = listenTogetherRoleState?.value == RoomRole.GUEST
@@ -507,8 +464,7 @@ private fun ThumbnailHeader(
                 )
             } else {
                 Text(
-                    text = if (remoteName != null) stringResource(R.string.device_connect_playing_on, remoteName)
-                        else stringResource(R.string.now_playing),
+                    text = stringResource(R.string.now_playing),
                     style = MaterialTheme.typography.titleMedium,
                     color = textColor
                 )
@@ -523,26 +479,6 @@ private fun ThumbnailHeader(
                     maxLines = 1,
                     modifier = Modifier.basicMarquee()
                 )
-            }
-            if (remoteName != null) {
-                TextButton(
-                    onClick = { connectManager?.requestOutputSwitch() },
-                    enabled = connectManager?.canSwitchOutput == true,
-                ) {
-                    Text(
-                        text = stringResource(R.string.device_connect_switch_output_here),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = textColor.copy(alpha = if (connectManager?.canSwitchOutput == true) 1f else 0.55f),
-                    )
-                }
-            } else if (canSendOutputToPeer && peerName != null) {
-                TextButton(onClick = { connectManager?.requestOutputSwitchToPeer() }) {
-                    Text(
-                        text = stringResource(R.string.device_connect_switch_output_other, peerName),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = textColor,
-                    )
-                }
             }
         }
     }
@@ -564,7 +500,7 @@ private fun ThumbnailItem(
     context: android.content.Context,
     isLandscape: Boolean = false,
     isListenTogetherGuest: Boolean = false,
-    isCurrentSong: Boolean = false,
+    currentMediaId: String? = null,
     currentMediaThumbnail: String? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -629,6 +565,7 @@ private fun ThumbnailItem(
             if (hidePlayerThumbnail) {
                 HiddenThumbnailPlaceholder(textBackgroundColor = textBackgroundColor)
             } else {
+                val isCurrentSong = item.mediaId == currentMediaId
                 val artworkUri = if (isCurrentSong && !currentMediaThumbnail.isNullOrBlank()) {
                     currentMediaThumbnail
                 } else {
@@ -636,12 +573,10 @@ private fun ThumbnailItem(
                 }
                 val artworkUriToUse = playerArtworkUrl(artworkUri, isCurrentSong)
 
-                key(artworkUriToUse) {
-                    ThumbnailImage(
-                        artworkUri = artworkUriToUse,
-                        cropArtwork = cropAlbumArt
-                    )
-                }
+                ThumbnailImage(
+                    artworkUri = artworkUriToUse,
+                    cropArtwork = cropAlbumArt
+                )
             }
             
             // Cast button at top-right corner of thumbnail

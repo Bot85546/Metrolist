@@ -20,7 +20,7 @@ fun Player.togglePlayPause() {
     if (!playWhenReady && playbackState == Player.STATE_IDLE) {
         prepare()
     }
-    if (playWhenReady) pause() else play()
+    playWhenReady = !playWhenReady
 }
 
 fun Player.toggleRepeatMode() {

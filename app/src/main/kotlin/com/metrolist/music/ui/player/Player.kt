@@ -142,8 +142,6 @@ import com.metrolist.music.LocalDatabase
 import com.metrolist.music.LocalDownloadUtil
 import com.metrolist.music.LocalListenTogetherManager
 import com.metrolist.music.LocalPlayerConnection
-import com.metrolist.music.LocalDeviceConnectManager
-import com.metrolist.music.connect.DeviceConnectProtocol
 import com.metrolist.music.R
 import com.metrolist.music.constants.CropAlbumArtKey
 import com.metrolist.music.constants.DarkModeKey
@@ -166,6 +164,7 @@ import com.metrolist.music.constants.ThumbnailCornerRadius
 import com.metrolist.music.constants.UseNewPlayerDesignKey
 import com.metrolist.music.db.entities.LyricsEntity
 import com.metrolist.music.extensions.metadata
+import com.metrolist.music.extensions.togglePlayPause
 import com.metrolist.music.extensions.toggleRepeatMode
 import com.metrolist.music.listentogether.RoomRole
 import com.metrolist.music.models.MediaMetadata
@@ -407,7 +406,7 @@ fun BottomSheetPlayer(
     }
     val gradientColorsCache = remember { mutableMapOf<String, List<Color>>() }
 
-    if (!canSkipNext && automix.isNotEmpty() && playerConnection.player === playerConnection.localPlayer) {
+    if (!canSkipNext && automix.isNotEmpty()) {
         playerConnection.service.addToQueueAutomix(automix[0], 0)
     }
 
@@ -592,29 +591,23 @@ fun BottomSheetPlayer(
         .getDownload(mediaMetadata?.id ?: "")
         .collectAsStateWithLifecycle(initialValue = null)
 
-    val connectManager = LocalDeviceConnectManager.current
-    val connectState by connectManager?.state?.collectAsStateWithLifecycle()
-        ?: remember { mutableStateOf(com.metrolist.music.connect.DeviceConnectUiState()) }
-    val remoteTimerState = connectState.remotePlayback.takeIf { connectManager?.isRemoteActive == true }
-    val sleepTimerEnabled = if (remoteTimerState != null) {
-        remoteTimerState.sleepTimerAfterSong || remoteTimerState.sleepTimerRemainingMs >= 0L
-    } else {
-        playerConnection.service.sleepTimer?.isActive ?: false
-    }
+    val sleepTimerEnabled =
+        remember(
+            playerConnection.service.sleepTimer?.triggerTime,
+            playerConnection.service.sleepTimer?.pauseWhenSongEnd,
+        ) {
+            playerConnection.service.sleepTimer?.isActive ?: false
+        }
 
     var sleepTimerTimeLeft by remember {
         mutableLongStateOf(0L)
     }
 
-    LaunchedEffect(sleepTimerEnabled, remoteTimerState?.revision) {
+    LaunchedEffect(sleepTimerEnabled) {
         if (sleepTimerEnabled) {
             while (isActive) {
                 sleepTimerTimeLeft =
-                    if (remoteTimerState != null && remoteTimerState.sleepTimerAfterSong) {
-                        playerConnection.player.duration - playerConnection.player.currentPosition
-                    } else if (remoteTimerState != null) {
-                        DeviceConnectProtocol.projectedSleepTimerRemainingMs(remoteTimerState, android.os.SystemClock.elapsedRealtime())
-                    } else if (playerConnection.service.sleepTimer?.pauseWhenSongEnd == true) {
+                    if (playerConnection.service.sleepTimer?.pauseWhenSongEnd == true) {
                         playerConnection.player.duration - playerConnection.player.currentPosition
                     } else {
                         (playerConnection.service.sleepTimer?.triggerTime ?: 0L) - System.currentTimeMillis()
@@ -654,8 +647,11 @@ fun BottomSheetPlayer(
                 TextButton(
                     onClick = {
                         showSleepTimerDialog = false
-                        playerConnection.startSleepTimer(sleepTimerValue.roundToInt(),
-                            sleepTimerStopAfterCurrentSong, sleepTimerFadeOut)
+                        playerConnection.service.sleepTimer?.start(
+                            minute = sleepTimerValue.roundToInt(),
+                            stopAfterCurrentSong = sleepTimerStopAfterCurrentSong,
+                            fadeOut = sleepTimerFadeOut,
+                        )
                     },
                 ) {
                     Text(stringResource(android.R.string.ok))
@@ -670,18 +666,6 @@ fun BottomSheetPlayer(
             },
             text = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (sleepTimerEnabled) {
-                        Text(
-                            text = if ((remoteTimerState?.sleepTimerAfterSong == true) ||
-                                (remoteTimerState == null && playerConnection.service.sleepTimer?.pauseWhenSongEnd == true)
-                            ) stringResource(R.string.device_connect_sleep_timer_end_of_song)
-                            else stringResource(R.string.device_connect_sleep_timer_remaining,
-                                (sleepTimerTimeLeft.coerceAtLeast(0L) + 59_999L) / 60_000L),
-                            color = MaterialTheme.colorScheme.primary,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                    }
                     Text(
                         text =
                             pluralStringResource(
@@ -746,18 +730,10 @@ fun BottomSheetPlayer(
                         OutlinedIconButton(
                             onClick = {
                                 showSleepTimerDialog = false
-                                playerConnection.startSleepTimer(-1, false, sleepTimerFadeOut)
+                                playerConnection.service.sleepTimer?.start(minute = -1)
                             },
                         ) {
                             Text(stringResource(R.string.end_of_song))
-                        }
-                        if (sleepTimerEnabled) {
-                            TextButton(onClick = {
-                                showSleepTimerDialog = false
-                                playerConnection.startSleepTimer(0)
-                            }) {
-                                Text(stringResource(R.string.device_connect_cancel_sleep_timer))
-                            }
                         }
                     }
                 }
@@ -1864,7 +1840,7 @@ fun BottomSheetPlayer(
                                                 playerConnection.player.seekTo(0, 0)
                                                 playerConnection.player.playWhenReady = true
                                             } else {
-                                                playerConnection.togglePlayPause()
+                                                playerConnection.player.togglePlayPause()
                                             }
                                         }
                                         .focusRequester(focusRequester),
