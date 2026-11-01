@@ -283,7 +283,6 @@ dependencies {
     "gmsImplementation"(libs.media3.cast)
     "gmsImplementation"(libs.mediarouter)
     "gmsImplementation"(libs.cast.framework)
-    "gmsImplementation"(libs.play.services.nearby)
 
     implementation(libs.room.runtime)
     implementation(libs.kuromoji.ipadic)

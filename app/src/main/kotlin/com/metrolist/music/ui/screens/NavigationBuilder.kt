@@ -54,7 +54,6 @@ import com.metrolist.music.ui.screens.settings.ThemeScreen
 import com.metrolist.music.ui.screens.settings.UpdaterScreen
 import com.metrolist.music.ui.screens.settings.integrations.IntegrationScreen
 import com.metrolist.music.ui.screens.settings.integrations.ListenTogetherSettings
-import com.metrolist.music.ui.screens.settings.integrations.DeviceConnectScreen
 
 import com.metrolist.music.ui.screens.wrapped.WrappedScreen
 import com.metrolist.music.utils.rememberEnumPreference
@@ -385,10 +384,6 @@ fun NavGraphBuilder.navigationBuilder(
 
     composable(route = "settings/integrations/listen_together") {
         ListenTogetherSettings(navController)
-    }
-
-    composable("settings/device_connect") {
-        DeviceConnectScreen(navController)
     }
 
     composable("settings/updater") {

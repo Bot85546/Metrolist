@@ -100,9 +100,6 @@ import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.exoplayer.source.ShuffleOrder.DefaultShuffleOrder
 import com.metrolist.music.LocalNavController
-import com.metrolist.music.LocalDeviceConnectManager
-import com.metrolist.music.connect.DeviceConnectProtocol
-import com.metrolist.music.connect.DeviceConnectUiState
 import com.metrolist.music.LocalListenTogetherManager
 import com.metrolist.music.LocalPlayerConnection
 import com.metrolist.music.R
@@ -237,24 +234,19 @@ fun Queue(
     LaunchedEffect(sleepTimerDefault) { sleepTimerValue = sleepTimerDefault }
     val sleepTimerStopAfterCurrentSong by rememberPreference(SleepTimerStopAfterCurrentSongKey, false)
     val sleepTimerFadeOut by rememberPreference(SleepTimerFadeOutKey, false)
-    val connectManager = LocalDeviceConnectManager.current
-    val connectState by connectManager?.state?.collectAsStateWithLifecycle()
-        ?: remember { mutableStateOf(DeviceConnectUiState()) }
-    val remoteTimer = connectState.remotePlayback.takeIf { connectManager?.isRemoteActive == true }
-    val sleepTimerEnabled = if (remoteTimer != null) {
-        remoteTimer.sleepTimerAfterSong || remoteTimer.sleepTimerRemainingMs >= 0L
-    } else playerConnection.service.sleepTimer?.isActive ?: false
+    val sleepTimerEnabled = remember(
+        playerConnection.service.sleepTimer?.triggerTime,
+        playerConnection.service.sleepTimer?.pauseWhenSongEnd
+    ) {
+        playerConnection.service.sleepTimer?.isActive ?: false
+    }
     var sleepTimerTimeLeft by remember { mutableLongStateOf(0L) }
 
-    LaunchedEffect(sleepTimerEnabled, remoteTimer?.revision) {
+    LaunchedEffect(sleepTimerEnabled) {
         if (sleepTimerEnabled) {
             while (isActive) {
                 sleepTimerTimeLeft =
-                    if (remoteTimer?.sleepTimerAfterSong == true) {
-                        playerConnection.player.duration - playerConnection.player.currentPosition
-                    } else if (remoteTimer != null) {
-                        DeviceConnectProtocol.projectedSleepTimerRemainingMs(remoteTimer, android.os.SystemClock.elapsedRealtime())
-                    } else if (playerConnection.service.sleepTimer?.pauseWhenSongEnd == true) {
+                    if (playerConnection.service.sleepTimer?.pauseWhenSongEnd == true) {
                         playerConnection.player.duration - playerConnection.player.currentPosition
                     } else {
                         (playerConnection.service.sleepTimer?.triggerTime ?: 0L) - System.currentTimeMillis()
@@ -321,7 +313,7 @@ fun Queue(
                         icon = R.drawable.bedtime,
                         onClick = {
                             if (sleepTimerEnabled) {
-                                playerConnection.startSleepTimer(0)
+                                playerConnection.service.sleepTimer?.clear()
                             } else {
                                 showSleepTimerDialog = true
                             }
@@ -469,7 +461,7 @@ fun Queue(
                         onClick = {
                             if (!isListenTogetherGuest) {
                                 if (sleepTimerEnabled) {
-                                    playerConnection.startSleepTimer(0)
+                                    playerConnection.service.sleepTimer?.clear()
                                 } else {
                                     showSleepTimerDialog = true
                                 }
@@ -565,8 +557,11 @@ fun Queue(
                     onDismiss = { showSleepTimerDialog = false },
                     onConfirm = {
                         showSleepTimerDialog = false
-                        playerConnection.startSleepTimer(sleepTimerValue.roundToInt(),
-                            sleepTimerStopAfterCurrentSong, sleepTimerFadeOut)
+                        playerConnection.service.sleepTimer?.start(
+                            minute = sleepTimerValue.roundToInt(),
+                            stopAfterCurrentSong = sleepTimerStopAfterCurrentSong,
+                            fadeOut = sleepTimerFadeOut,
+                        )
                     },
                     onCancel = {
                         showSleepTimerDialog = false
@@ -645,7 +640,9 @@ fun Queue(
                                 OutlinedButton(
                                     onClick = {
                                         showSleepTimerDialog = false
-                                        playerConnection.startSleepTimer(-1)
+                                        playerConnection.service.sleepTimer?.start(
+                                            minute = -1,
+                                        )
                                     },
                                 ) {
                                     Text(stringResource(R.string.end_of_song))
@@ -715,8 +712,8 @@ fun Queue(
 
                     if (!playerConnection.player.shuffleModeEnabled) {
                         playerConnection.player.moveMediaItem(safeFrom, safeTo)
-                    } else if (playerConnection.player === playerConnection.localPlayer) {
-                        playerConnection.localPlayer.setShuffleOrder(
+                    } else {
+                        playerConnection.player.setShuffleOrder(
                             DefaultShuffleOrder(
                                 queueWindows
                                     .map { it.firstPeriodIndex }

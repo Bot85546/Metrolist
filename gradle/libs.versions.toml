@@ -12,7 +12,6 @@ appcompat = "1.8.0"
 media3 = "1.10.1" # 1.11.1 hides Android 17 media controls (#4404)
 mediarouter = "1.8.1"
 castFramework = "22.3.1"
-nearby = "19.5.1"
 room = "2.8.5"
 hilt = "2.60.1"
 ktor = "3.6.0"
@@ -79,7 +78,6 @@ media3-cast = { module = "androidx.media3:media3-cast", version.ref = "media3" }
 
 mediarouter = { module = "androidx.mediarouter:mediarouter", version.ref = "mediarouter" }
 cast-framework = { module = "com.google.android.gms:play-services-cast-framework", version.ref = "castFramework" }
-play-services-nearby = { module = "com.google.android.gms:play-services-nearby", version.ref = "nearby" }
 
 room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
 room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }

@@ -118,6 +118,7 @@ fun PlayerMenu(
     val database = LocalDatabase.current
     val playerConnection = LocalPlayerConnection.current ?: return
     val playerVolume = playerConnection.service.playerVolume.collectAsStateWithLifecycle()
+
     // Cast state for volume control - safely access castConnectionHandler to prevent crashes
     val castHandler =
         remember(playerConnection) {
@@ -283,10 +284,9 @@ fun PlayerMenu(
                         if (isCasting) {
                             castHandler?.setVolume(volume)
                         } else {
-                            playerConnection.setPlayerVolume(volume)
+                            playerConnection.service.playerVolume.value = volume
                         }
                     },
-                    onValueChangeFinished = {},
                     modifier = Modifier.weight(1f),
                     accentColor = MaterialTheme.colorScheme.primary,
                 )
@@ -686,7 +686,7 @@ fun PlayerMenu(
                                         )
                                     },
                                     onClick = {
-                                        val audioSessionId = playerConnection.localPlayer.audioSessionId
+                                        val audioSessionId = playerConnection.player.audioSessionId
                                         if (audioSessionId != C.AUDIO_SESSION_ID_UNSET && audioSessionId > 0) {
                                             val intent = Intent(AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL).apply {
                                                 putExtra(AudioEffect.EXTRA_AUDIO_SESSION, audioSessionId)
