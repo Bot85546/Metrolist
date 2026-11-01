@@ -68,7 +68,7 @@ fun YouTubeBrowseScreen(
     val browseResult by viewModel.result.collectAsStateWithLifecycle()
 
     val coroutineScope = rememberCoroutineScope()
-    val gridItemSize by rememberEnumPreference(GridItemsSizeKey, GridItemSize.BIG)
+    val gridItemSize by rememberEnumPreference(GridItemsSizeKey, GridItemSize.SMALL)
 
     val allItems = browseResult?.items?.flatMap { it.items } ?: emptyList()
 
