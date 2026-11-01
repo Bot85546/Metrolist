@@ -5,10 +5,6 @@
 
 package com.metrolist.music
 
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.metrolist.music.ui.theme.LocalMetrolittBackdrop
-
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.PendingIntent
@@ -830,7 +826,7 @@ class MainActivity : FragmentActivity() {
                 val isLandscape = configuration.containerDpSize.width > configuration.containerDpSize.height
                 val isTablet = configuration.containerDpSize.width >= 600.dp
 
-                val showRail = !forceBottomNav && isTablet && !inSearchScreen
+                val showRail = !forceBottomNav && (isLandscape || isTablet) && !inSearchScreen
 
                 val navPadding =
                     if (shouldShowNavigationBar && !showRail) {
@@ -1037,9 +1033,7 @@ class MainActivity : FragmentActivity() {
                 val baseBg = if (pureBlack) Color.Black else MaterialTheme.colorScheme.surfaceContainer
                 val artistNameAliases by ArtistNameAliases.aliases.collectAsStateWithLifecycle()
 
-                val metrolittBackdrop = rememberLayerBackdrop()
                 CompositionLocalProvider(
-                    LocalMetrolittBackdrop provides metrolittBackdrop,
                     LocalDatabase provides database,
                     LocalNavController provides navController,
                     LocalContentColor provides if (pureBlack) Color.White else contentColorFor(MaterialTheme.colorScheme.surface),
@@ -1347,7 +1341,7 @@ class MainActivity : FragmentActivity() {
                                     onHomeLongHold = { showAccountDialog = true },
                                 )
                             }
-                            Box(Modifier.weight(1f).layerBackdrop(metrolittBackdrop)) {
+                            Box(Modifier.weight(1f)) {
                                 // NavHost with animations (Material 3 Expressive style)
                                 NavHost(
                                     navController = navController,

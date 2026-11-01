@@ -16,7 +16,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.SaverScope
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
@@ -65,14 +64,6 @@ fun MetrolistTheme(
     // Use standard MaterialTheme instead of MaterialExpressiveTheme
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = MetrolittTypography,
-        shapes = androidx.compose.material3.Shapes(
-            extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
-            small = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-            medium = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
-            large = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
-            extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(32.dp),
-        ),
         content = content,
     )
 }

@@ -28,9 +28,6 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
@@ -1217,27 +1214,75 @@ fun BottomSheetPlayer(
                 Spacer(modifier = Modifier.width(12.dp))
 
                 if (useNewPlayerDesign) {
-                    val shareShape = RoundedCornerShape(50)
-                    val favShape = RoundedCornerShape(50)
+                    val shareShape =
+                        RoundedCornerShape(
+                            topStart = 50.dp,
+                            bottomStart = 50.dp,
+                            topEnd = 3.dp,
+                            bottomEnd = 3.dp,
+                        )
+
+                    val favShape =
+                        RoundedCornerShape(
+                            topStart = 3.dp,
+                            bottomStart = 3.dp,
+                            topEnd = 50.dp,
+                            bottomEnd = 50.dp,
+                        )
+
+                    val middleShape = RoundedCornerShape(3.dp)
 
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        FilledIconButton(
-                            onClick = { showInlineLyrics = !showInlineLyrics },
-                            shape = shareShape,
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = textButtonColor,
-                                contentColor = iconButtonColor,
-                            ),
-                            modifier = Modifier.size(48.dp),
-                        ) {
-                            Icon(
-                                painter = painterResource(R.drawable.lyrics),
-                                contentDescription = stringResource(R.string.lyrics),
-                                modifier = Modifier.size(24.dp),
-                            )
+                        AnimatedContent(targetState = showInlineLyrics, label = "ShareButton") { showLyrics ->
+                            if (showLyrics) {
+                                FilledIconButton(
+                                    onClick = { isFullScreen = !isFullScreen },
+                                    shape = shareShape,
+                                    colors =
+                                        IconButtonDefaults.filledIconButtonColors(
+                                            containerColor = textButtonColor,
+                                            contentColor = iconButtonColor,
+                                        ),
+                                    modifier = Modifier.size(42.dp),
+                                ) {
+                                    Icon(
+                                        painter = painterResource(R.drawable.fullscreen),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(24.dp),
+                                    )
+                                }
+                            } else {
+                                FilledIconButton(
+                                    onClick = {
+                                        val intent =
+                                            Intent().apply {
+                                                action = Intent.ACTION_SEND
+                                                type = "text/plain"
+                                                putExtra(
+                                                    Intent.EXTRA_TEXT,
+                                                    "https://music.youtube.com/watch?v=${mediaMetadata.id}",
+                                                )
+                                            }
+                                        context.startActivity(Intent.createChooser(intent, null))
+                                    },
+                                    shape = shareShape,
+                                    colors =
+                                        IconButtonDefaults.filledIconButtonColors(
+                                            containerColor = textButtonColor,
+                                            contentColor = iconButtonColor,
+                                        ),
+                                    modifier = Modifier.size(42.dp),
+                                ) {
+                                    Icon(
+                                        painter = painterResource(R.drawable.share),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(24.dp),
+                                    )
+                                }
+                            }
                         }
 
                         AnimatedContent(targetState = showInlineLyrics, label = "LikeButton") { showLyrics ->
@@ -1267,7 +1312,7 @@ fun BottomSheetPlayer(
                                             containerColor = textButtonColor,
                                             contentColor = iconButtonColor,
                                         ),
-                                    modifier = Modifier.size(48.dp),
+                                    modifier = Modifier.size(42.dp),
                                 ) {
                                     Icon(
                                         painter = painterResource(R.drawable.more_horiz),
@@ -1287,7 +1332,7 @@ fun BottomSheetPlayer(
                                             containerColor = textButtonColor,
                                             contentColor = iconButtonColor,
                                         ),
-                                    modifier = Modifier.size(48.dp),
+                                    modifier = Modifier.size(42.dp),
                                 ) {
                                     Icon(
                                         painter =
@@ -1885,9 +1930,8 @@ fun BottomSheetPlayer(
             }
         }
 
-        val playerWindow = LocalConfiguration.current
-        when {
-            playerWindow.screenWidthDp >= 600 && playerWindow.screenWidthDp > playerWindow.screenHeightDp -> {
+        when (LocalConfiguration.current.orientation) {
+            Configuration.ORIENTATION_LANDSCAPE -> {
                 // Calculate vertical padding like OuterTune
                 val density = LocalDensity.current
                 val verticalPadding =
@@ -1945,13 +1989,16 @@ fun BottomSheetPlayer(
                         modifier =
                             Modifier
                                 .weight(if (showInlineLyrics) 0.65f else 1f, false)
-                                .fillMaxHeight()
-                                .windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Top))
-                                .verticalScroll(rememberScrollState()),
+                                .animateContentSize()
+                                .windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Top)),
                     ) {
-                        Spacer(Modifier.height(16.dp))
-                        mediaMetadata?.let { controlsContent(it) }
-                        Spacer(Modifier.height(16.dp))
+                        Spacer(Modifier.weight(1f))
+
+                        mediaMetadata?.let {
+                            controlsContent(it)
+                        }
+
+                        Spacer(Modifier.weight(1f))
                     }
                 }
             }

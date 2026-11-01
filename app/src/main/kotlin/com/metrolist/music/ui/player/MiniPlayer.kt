@@ -7,8 +7,6 @@
 
 package com.metrolist.music.ui.player
 
-import com.metrolist.music.ui.theme.metrolittGlass
-
 import android.content.res.Configuration
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
@@ -381,10 +379,9 @@ private fun NewMiniPlayer(
                     .then(if (isTabletLandscape) Modifier.width(500.dp).align(Alignment.Center) else Modifier.fillMaxWidth())
                     .height(64.dp)
                     .offset { IntOffset(offsetXAnimatable.value.roundToInt(), 0) }
-                    .clip(RoundedCornerShape(22.dp))
-                    .metrolittGlass(RoundedCornerShape(22.dp), backgroundColor)
-                    .background(color = backgroundColor.copy(alpha = if (android.os.Build.VERSION.SDK_INT >= 31) 0.32f else 1f))
-                    .border(1.dp, outlineColor.copy(alpha = 0.18f), RoundedCornerShape(22.dp))
+                    .clip(RoundedCornerShape(32.dp))
+                    .background(color = backgroundColor)
+                    .border(1.dp, outlineColor.copy(alpha = 0.3f), RoundedCornerShape(32.dp))
                     .clickable(
                         interactionSource = interactionSource,
                         indication = LocalIndication.current,
@@ -421,7 +418,7 @@ private fun NewMiniPlayer(
                         Modifier
                             .fillMaxSize()
                             .background(
-                                Brush.horizontalGradient(colors.map { it.copy(alpha = if (android.os.Build.VERSION.SDK_INT >= 31) 0.56f else 1f) })
+                                Brush.horizontalGradient(colors)
                             )
                             .background(Color.Black.copy(alpha = 0.15f)),
                     )
@@ -432,13 +429,20 @@ private fun NewMiniPlayer(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 8.dp),
             ) {
-                AsyncImage(
-                    model = mediaMetadata?.thumbnailUrl,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)),
+                // Play button with progress - isolated composable
+                NewMiniPlayerPlayButton(
+                    progressState = progressState,
+                    playbackState = playbackState,
+                    isCasting = isCasting,
+                    castHandler = castHandler,
+                    playerConnection = playerConnection,
+                    mediaMetadata = mediaMetadata,
+                    primaryColor = primaryColor,
+                    outlineColor = outlineColor,
+                    listenTogetherManager = listenTogetherManager,
                 )
-                Spacer(modifier = Modifier.width(12.dp))
+
+                Spacer(modifier = Modifier.width(16.dp))
 
                 // Song info - isolated composable
                 NewMiniPlayerSongInfo(
@@ -461,20 +465,18 @@ private fun NewMiniPlayer(
                     Spacer(modifier = Modifier.width(12.dp))
                 }
 
-                // Play button with progress - isolated composable
-                NewMiniPlayerPlayButton(
-                    progressState = progressState,
-                    playbackState = playbackState,
-                    isCasting = isCasting,
-                    castHandler = castHandler,
-                    playerConnection = playerConnection,
-                    mediaMetadata = mediaMetadata,
-                    primaryColor = primaryColor,
-                    outlineColor = outlineColor,
-                    listenTogetherManager = listenTogetherManager,
-                )
+// Subscribe button - isolated composable
+                mediaMetadata?.artists?.firstOrNull()?.id?.let { artistId ->
+                    SubscribeButton(
+                        artistId = artistId,
+                        metadata = mediaMetadata!!,
+                        primaryColor = primaryColor,
+                        outlineColor = outlineColor,
+                        onSurfaceColor = onSurfaceColor,
+                    )
+                }
 
-                Spacer(modifier = Modifier.width(16.dp))
+                Spacer(modifier = Modifier.width(8.dp))
 
 // Favorite button - isolated composable
                 mediaMetadata?.let { FavoriteButton(

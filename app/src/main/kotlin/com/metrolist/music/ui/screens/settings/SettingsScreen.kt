@@ -74,6 +74,20 @@ fun SettingsScreen(
             )
         )
 
+        // User Interface Section
+        Material3SettingsGroup(
+            title = stringResource(R.string.settings_section_ui),
+            items = listOf(
+                Material3SettingsItem(
+                    icon = painterResource(R.drawable.palette),
+                    title = { Text(stringResource(R.string.appearance)) },
+                    onClick = { navController.navigate("settings/appearance") }
+                )
+            )
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         // Player & Content Section (moved up and combined with content)
         Material3SettingsGroup(
             title = stringResource(R.string.settings_section_player_content),
