@@ -105,7 +105,7 @@ fun LibraryAlbumsScreen(
             AlbumSortType.CREATE_DATE,
         )
     val (sortDescending, onSortDescendingChange) = rememberPreference(AlbumSortDescendingKey, true)
-    val gridItemSize by rememberEnumPreference(GridItemsSizeKey, GridItemSize.BIG)
+    val gridItemSize by rememberEnumPreference(GridItemsSizeKey, GridItemSize.SMALL)
 
     val (ytmSync) = rememberPreference(YtmSyncKey, true)
     val hideExplicit by rememberPreference(key = HideExplicitKey, defaultValue = false)

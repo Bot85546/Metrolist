@@ -34,7 +34,7 @@ fun GridItemPlaceHolder(
     thumbnailShape: Shape = RoundedCornerShape(ThumbnailCornerRadius),
     fillMaxWidth: Boolean = false,
 ) {
-    val gridItemSize by rememberEnumPreference(GridItemsSizeKey, GridItemSize.BIG)
+    val gridItemSize by rememberEnumPreference(GridItemsSizeKey, GridItemSize.SMALL)
     val gridHeight = if (gridItemSize == GridItemSize.BIG) GridThumbnailHeight else SmallGridThumbnailHeight
     
     Column(

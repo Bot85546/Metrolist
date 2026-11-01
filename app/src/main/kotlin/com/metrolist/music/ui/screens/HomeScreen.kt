@@ -752,7 +752,7 @@ fun HomeScreen(
     var randomizeJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     val lazylistState = rememberLazyListState()
-    val gridItemSize by rememberEnumPreference(GridItemsSizeKey, GridItemSize.BIG)
+    val gridItemSize by rememberEnumPreference(GridItemsSizeKey, GridItemSize.SMALL)
     val currentGridHeight = if (gridItemSize == GridItemSize.BIG) GridThumbnailHeight else SmallGridThumbnailHeight
     val backStackEntry by navController.currentBackStackEntryAsState()
     val scrollToTop =

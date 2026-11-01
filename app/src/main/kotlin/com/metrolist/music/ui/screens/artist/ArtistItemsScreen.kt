@@ -80,7 +80,7 @@ fun ArtistItemsScreen(
     val lazyListState = rememberLazyListState()
     val lazyGridState = rememberLazyGridState()
     val coroutineScope = rememberCoroutineScope()
-    val gridItemSize by rememberEnumPreference(GridItemsSizeKey, GridItemSize.BIG)
+    val gridItemSize by rememberEnumPreference(GridItemsSizeKey, GridItemSize.SMALL)
 
     val title by viewModel.title.collectAsStateWithLifecycle()
     val itemsPage by viewModel.itemsPage.collectAsStateWithLifecycle()
