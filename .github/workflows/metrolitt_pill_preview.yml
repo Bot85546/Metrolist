@@ -10,6 +10,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build:
+    name: Build separate-install Metrolitt Pill Preview
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -19,14 +20,48 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v4
-      - name: Build fast GMS debug APK
-        run: chmod +x gradlew && ./gradlew --console=plain :app:assembleGmsDebug -x lint --warning-mode summary
+      - name: Restore persistent preview signing keystore
+        id: preview_key
+        uses: actions/cache/restore@v4
+        with:
+          path: app/pill-preview.keystore
+          key: metrolitt-pill-preview-signing-key-v1
+      - name: Create preview signing keystore on first build
+        if: steps.preview_key.outputs.cache-hit != 'true'
+        run: |
+          keytool -genkeypair -noprompt -keystore app/pill-preview.keystore \
+            -storepass android -keypass android -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Metrolitt Pill Preview,O=Metrolitt,C=AT"
+      - name: Save persistent preview signing keystore
+        if: steps.preview_key.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: app/pill-preview.keystore
+          key: metrolitt-pill-preview-signing-key-v1
+      - name: Build quick installable APK
+        run: |
+          chmod +x gradlew
+          ./gradlew --console=plain :app:assembleGmsDebug -x lint --warning-mode summary
         env:
           METROLIST_APPLICATION_ID: com.metrolitt.music.pillpreview
           METROLIST_APP_NAME: Metrolitt Pill Preview
-      - uses: actions/upload-artifact@v4
+          METROLIST_DEBUG_KEYSTORE_PATH: pill-preview.keystore
+      - name: Verify package and APK signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/gms/debug/app-gms-debug.apk"
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          test -s "$APK"
+          "$BUILD_TOOLS/aapt" dump badging "$APK" | grep "^package: name='com.metrolitt.music.pillpreview' "
+          "$BUILD_TOOLS/apksigner" verify --verbose "$APK"
+          mkdir -p preview-apk
+          cp "$APK" preview-apk/Metrolitt-Pill-Preview.apk
+      - name: Upload clearly named TEST APK
+        uses: actions/upload-artifact@v4
         with:
-          name: Metrolitt-Pill-Preview-APK
-          path: app/build/outputs/apk/gms/debug/*.apk
+          name: INSTALL-THIS-Metrolitt-Pill-Preview
+          path: preview-apk/Metrolitt-Pill-Preview.apk
           if-no-files-found: error
           retention-days: 14
