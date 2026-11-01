@@ -7,6 +7,15 @@ package com.metrolist.music.ui.component
 
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -144,10 +153,18 @@ fun AppNavigationBar(
     val haptics = LocalHapticFeedback.current
     val viewConfiguration = LocalViewConfiguration.current
 
+    val pillShape = RoundedCornerShape(32.dp)
     NavigationBar(
-        modifier = modifier,
-        containerColor = containerColor,
-        contentColor = contentColor
+        modifier = modifier
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .shadow(6.dp, pillShape)
+            .clip(pillShape)
+            .background(Brush.verticalGradient(listOf(containerColor.copy(alpha = 0.96f), containerColor.copy(alpha = 0.88f))))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f), pillShape),
+        containerColor = Color.Transparent,
+        contentColor = contentColor,
+        windowInsets = WindowInsets(0, 0, 0, 0),
+        tonalElevation = 0.dp,
     ) {
         navigationItems.forEach { screen ->
             val isSelected = remember(currentRoute, screen.route) {
