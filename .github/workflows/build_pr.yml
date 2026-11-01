@@ -19,6 +19,9 @@ concurrency:
 
 jobs:
   build:
+    # This branch has its own dedicated standalone preview APK workflow.
+    # Never upload a same-package, differently signed production-named APK.
+    if: github.head_ref != 'feature/metrolitt-pill-navigation-preview'
     name: Metrolitt Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 35
