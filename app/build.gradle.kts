@@ -262,6 +262,7 @@ dependencies {
     implementation(libs.lifecycle.process)
 
     implementation(libs.material3)
+    implementation(libs.backdrop)
     implementation(libs.palette)
     implementation(libs.materialKolor)
 

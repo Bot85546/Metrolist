@@ -90,6 +90,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -179,7 +181,7 @@ import com.metrolist.music.playback.MusicService.MusicBinder
 import com.metrolist.music.playback.PlayerConnection
 import com.metrolist.music.playback.queues.YouTubeQueue
 import com.metrolist.music.ui.component.AccountSettingsDialog
-import com.metrolist.music.ui.component.AppNavigationBar
+import com.metrolist.music.ui.component.GlassNavigationBar
 import com.metrolist.music.ui.component.AppNavigationRail
 import com.metrolist.music.ui.component.BottomSheetMenu
 import com.metrolist.music.ui.component.BottomSheetPage
@@ -704,6 +706,13 @@ class MainActivity : FragmentActivity() {
                         .fillMaxSize()
                         .background(if (pureBlack) Color.Black else MaterialTheme.colorScheme.surface),
             ) {
+                // The page is the backdrop source. The bar is its sibling in Scaffold's
+                // bottomBar, so the glass never samples or feeds back into itself.
+                val glassBaseColor = if (pureBlack) Color.Black else MaterialTheme.colorScheme.surface
+                val navigationBackdrop = rememberLayerBackdrop {
+                    drawRect(glassBaseColor)
+                    drawContent()
+                }
                 val density = LocalDensity.current
                 val configuration = LocalWindowInfo.current
                 val cutoutInsets = WindowInsets.displayCutout
@@ -1180,10 +1189,11 @@ class MainActivity : FragmentActivity() {
                                         )
                                     }
 
-                                    AppNavigationBar(
+                                    GlassNavigationBar(
                                         navigationItems = navigationItems,
                                         currentRoute = currentRoute,
                                         onItemClick = onNavItemClick,
+                                        backdrop = navigationBackdrop,
                                         pureBlack = pureBlack,
                                         slimNav = slimNav,
                                         onHomeLongHold = { showAccountDialog = true },
@@ -1262,7 +1272,17 @@ class MainActivity : FragmentActivity() {
                                 .fillMaxSize()
                                 .nestedScroll(topAppBarScrollBehavior.nestedScrollConnection),
                     ) {
-                        Row(Modifier.fillMaxSize()) {
+                        Row(
+                            Modifier
+                                .fillMaxSize()
+                                .then(
+                                    if (!showRail && shouldShowNavigationBar) {
+                                        Modifier.layerBackdrop(navigationBackdrop)
+                                    } else {
+                                        Modifier
+                                    },
+                                ),
+                        ) {
                             val onRailItemClick: (Screens, Boolean) -> Unit =
                                 remember(navController, coroutineScope, topAppBarScrollBehavior, playerBottomSheetState) {
                                     { screen: Screens, isSelected: Boolean ->
