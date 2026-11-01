@@ -34,6 +34,7 @@ kuromojiIpadic = "0.9.0"
 innertubex = "v0.11.0"
 tinypinyin = "2.0.3"
 protobuf = "4.36.2"
+backdrop = "2.0.1"
 
 [libraries]
 guava = { module = "com.google.guava:guava", version.ref = "guava" }
@@ -55,6 +56,7 @@ viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose",
 lifecycle-process = { module = "androidx.lifecycle:lifecycle-process", version.ref = "lifecycle" }
 
 material3 = { module = "androidx.compose.material3:material3", version.ref = "material3" }
+backdrop = { module = "io.github.kyant0:backdrop", version.ref = "backdrop" }
 
 materialKolor = { module = "com.materialkolor:material-kolor", version.ref = "materialKolor" }
 
