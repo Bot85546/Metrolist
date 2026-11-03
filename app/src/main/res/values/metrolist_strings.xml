@@ -549,6 +549,9 @@
     <string name="previous">Previous</string>
     <string name="play_pause">Play/Pause</string>
     <string name="player_pause">Pause</string>
+    <string name="player_fullscreen_lyrics">Toggle full screen lyrics</string>
+    <string name="player_collapse">Collapse player</string>
+    <string name="player_remove_favorite">Remove from favorites</string>
     <string name="next">Next</string>
     <string name="like">Like</string>
     <string name="not_playing">No song playing</string>
@@ -995,4 +998,6 @@
     <string name="stream_source_web_creator_desc">Creator web client.</string>
     <string name="top_result">Top result</string>
     <string name="other">Other</string>
+    <string name="mini_player_playing">Playing</string>
+    <string name="mini_player_paused">Paused</string>
 </resources>

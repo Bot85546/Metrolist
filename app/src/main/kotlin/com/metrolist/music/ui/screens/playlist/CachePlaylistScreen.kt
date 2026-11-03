@@ -88,6 +88,7 @@ import com.metrolist.music.ui.component.IconButton
 import com.metrolist.music.ui.component.LibraryCategory
 import com.metrolist.music.ui.component.LibraryCategoryThumbnail
 import com.metrolist.music.ui.component.LocalMenuState
+import com.metrolist.music.ui.component.PlaylistBackdrop
 import com.metrolist.music.ui.component.SongListItem
 import com.metrolist.music.ui.component.SortHeader
 import com.metrolist.music.ui.menu.CachePlaylistMenu
@@ -191,6 +192,7 @@ fun CachePlaylistScreen(
     Box(
         modifier = Modifier.fillMaxSize(),
     ) {
+        PlaylistBackdrop()
         LazyColumn(
             state = lazyListState,
             contentPadding = LocalPlayerAwareWindowInsets.current.asPaddingValues(),

@@ -126,7 +126,7 @@ android {
             }
             isDebuggable = true
             if (appNameOverride == null) {
-                resValue("string", "app_name", "Metrolist Debug")
+                resValue("string", "app_name", "Metrolitt Debug")
             }
             signingConfig =
                 if (workflowDebugKeystoreFile != null) {
@@ -136,6 +136,18 @@ android {
                 } else {
                     signingConfigs.getByName("debug")
                 }
+        }
+        create("performance") {
+            initWith(getByName("debug"))
+            isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            isCrunchPngs = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+            matchingFallbacks += listOf("release")
         }
     }
 
@@ -252,11 +264,14 @@ dependencies {
     implementation(libs.datastore)
 
     implementation(libs.compose.runtime)
+    add("performanceImplementation", "androidx.compose.runtime:runtime-tracing:${libs.versions.compose.get()}")
     implementation(libs.compose.foundation)
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.util)
     implementation(libs.compose.animation)
     implementation(libs.compose.reorderable)
+    implementation("dev.chrisbanes.haze:haze:2.0.1")
+    implementation("dev.chrisbanes.haze:haze-glass:2.0.1")
 
     implementation(libs.viewmodel.compose)
     implementation(libs.lifecycle.process)

@@ -5,19 +5,26 @@
 
 package com.metrolist.music.ui.component
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import kotlin.math.PI
+import kotlin.math.sin
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
-import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -25,64 +32,71 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.metrolist.music.R
-import com.metrolist.music.constants.ThumbnailCornerRadius
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlin.random.Random
 
 @Composable
-fun PlayingIndicator(
+fun PlaybackStateIndicator(
     color: Color,
+    isPlaying: Boolean,
     modifier: Modifier = Modifier,
-    bars: Int = 3,
-    barWidth: Dp = 4.dp,
-    cornerRadius: Dp = ThumbnailCornerRadius,
 ) {
-    val animatables =
-        remember {
-            List(bars) {
-                Animatable(0.1f)
-            }
-        }
+    val playbackDescription = stringResource(
+        if (isPlaying) R.string.mini_player_playing else R.string.mini_player_paused,
+    )
 
-    LaunchedEffect(Unit) {
-        delay(300)
-        animatables.forEach { animatable ->
-            launch {
-                while (true) {
-                    animatable.animateTo(Random.nextFloat() * 0.9f + 0.1f)
-                    delay(50)
-                }
-            }
-        }
-    }
-
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.Bottom,
-        modifier = modifier,
-    ) {
-        animatables.forEach { animatable ->
-            Canvas(
-                modifier =
-                Modifier
-                    .fillMaxHeight()
-                    .width(barWidth),
-            ) {
-                drawRoundRect(
-                    color = color,
-                    topLeft = Offset(x = 0f, y = size.height * (1 - animatable.value)),
-                    size = size.copy(height = animatable.value * size.height),
-                    cornerRadius = CornerRadius(cornerRadius.toPx()),
+    val morph = animateFloatAsState(
+        targetValue = if (isPlaying) 1f else 0f,
+        animationSpec = tween(420, easing = FastOutSlowInEasing),
+        label = "Mini player bar morph",
+    )
+    val phase = remember { Animatable(0f) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(isPlaying, lifecycle) {
+        if (isPlaying) {
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                phase.animateTo(
+                    targetValue = phase.value + (2 * PI).toFloat(),
+                    animationSpec = infiniteRepeatable(tween(1600, easing = LinearEasing)),
                 )
             }
         }
     }
+
+    Box(
+        modifier = modifier
+            .size(40.dp)
+            .semantics { stateDescription = playbackDescription }
+            .drawBehind {
+                // Read animation state only while drawing, keeping text and layout out of each frame.
+                val progress = morph.value
+                val wave = phase.value
+                val unit = minOf(size.width, size.height) / 40f
+                for (bar in 0..2) {
+                    val middle = bar == 1
+                    val amplitude = (sin(wave + bar * 2.1f) + 1f) * 0.5f
+                    val playingHeight = 8f + 16f * amplitude
+                    val height = if (middle) {
+                        playingHeight * progress * progress
+                    } else {
+                        20f + (playingHeight - 20f) * progress
+                    }
+                    val width = if (middle) 4f * progress else 5.5f - 1.5f * progress
+                    val x = if (middle) 0f else (bar - 1) * (6f + 4f * progress)
+                    val bottom = center.y + (10f + 2f * progress) * unit
+                    if (width > 0f && height > 0f) {
+                        drawRoundRect(
+                            color = color,
+                            topLeft = Offset(center.x + (x - width / 2f) * unit, bottom - height * unit),
+                            size = Size(width * unit, height * unit),
+                            cornerRadius = CornerRadius(width * unit / 2f),
+                        )
+                    }
+                }
+            },
+    )
 }
 
 @Composable
@@ -101,18 +115,7 @@ fun PlayingIndicatorBox(
             contentAlignment = Alignment.Center,
             modifier = modifier,
         ) {
-            if (playWhenReady) {
-                PlayingIndicator(
-                    color = color,
-                    modifier = Modifier.height(24.dp),
-                )
-            } else {
-                Icon(
-                    painter = painterResource(R.drawable.play),
-                    contentDescription = null,
-                    tint = color,
-                )
-            }
+            PlaybackStateIndicator(color = color, isPlaying = playWhenReady)
         }
     }
 }

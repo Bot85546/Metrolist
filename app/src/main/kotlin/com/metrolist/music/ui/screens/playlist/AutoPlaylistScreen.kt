@@ -112,6 +112,7 @@ import com.metrolist.music.ui.component.IconButton
 import com.metrolist.music.ui.component.LibraryCategory
 import com.metrolist.music.ui.component.LibraryCategoryThumbnail
 import com.metrolist.music.ui.component.LocalMenuState
+import com.metrolist.music.ui.component.PlaylistBackdrop
 import com.metrolist.music.ui.component.SongListItem
 import com.metrolist.music.ui.component.SortHeader
 import com.metrolist.music.ui.menu.AutoPlaylistMenu
@@ -184,6 +185,12 @@ fun AutoPlaylistScreen(
             "downloaded" -> PlaylistType.DOWNLOAD
             "uploaded" -> PlaylistType.UPLOADED
             else -> PlaylistType.OTHER
+        }
+    val playlistCategory =
+        when (playlistType) {
+            PlaylistType.LIKE -> LibraryCategory.LIKED
+            PlaylistType.UPLOADED -> LibraryCategory.UPLOADED
+            else -> LibraryCategory.DOWNLOADED
         }
 
     var inSelectMode by rememberSaveable { mutableStateOf(false) }
@@ -504,6 +511,7 @@ fun AutoPlaylistScreen(
                     },
                 ),
     ) {
+        PlaylistBackdrop()
         LazyColumn(
             state = state,
             contentPadding = LocalPlayerAwareWindowInsets.current.asPaddingValues(),
@@ -521,11 +529,7 @@ fun AutoPlaylistScreen(
                         item(key = "playlist_header") {
                             AutoPlaylistHeader(
                                 name = playlist,
-                                category = when (playlistType) {
-                                    PlaylistType.LIKE -> LibraryCategory.LIKED
-                                    PlaylistType.UPLOADED -> LibraryCategory.UPLOADED
-                                    else -> LibraryCategory.DOWNLOADED
-                                },
+                                category = playlistCategory,
                                 songs = songs!!,
                                 likeLength = likeLength,
                                 downloadState = downloadState,

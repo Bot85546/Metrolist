@@ -15,8 +15,6 @@ import java.time.ZoneOffset
 
 val EnableHighRefreshRateKey = booleanPreferencesKey("enableHighRefreshRate")
 val EnableLandscapeScalingKey = booleanPreferencesKey("enableLandscapeScaling")
-val DynamicThemeKey = booleanPreferencesKey("dynamicTheme")
-val SelectedThemeColorKey = intPreferencesKey("selectedThemeColor")
 val DarkModeKey = stringPreferencesKey("darkMode")
 val PureBlackKey = booleanPreferencesKey("pureBlack")
 val PureBlackMiniPlayerKey = booleanPreferencesKey("pureBlackMiniPlayer")
@@ -328,6 +326,8 @@ enum class GridItemSize {
     BIG,
     SMALL,
 }
+
+val MyTopFilterKey = stringPreferencesKey("myTopFilter")
 
 enum class MyTopFilter {
     ALL_TIME,

@@ -7,10 +7,12 @@ package com.metrolist.music
 
 import android.app.ActivityManager
 import android.app.Application
+import android.app.LocaleManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
+import android.os.LocaleList
 import android.os.Process
 import android.widget.Toast
 import coil3.ImageLoader
@@ -71,6 +73,17 @@ class App :
         // process claim WebView's data directory and crash the next main-process WebView.
         if (!isMainProcess()) return
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val preferences = getSharedPreferences("language_defaults", MODE_PRIVATE)
+            if (!preferences.getBoolean("initialized", false)) {
+                val localeManager = getSystemService(LocaleManager::class.java)
+                if (localeManager.applicationLocales.isEmpty) {
+                    localeManager.applicationLocales = LocaleList.forLanguageTags("en")
+                }
+                preferences.edit().putBoolean("initialized", true).apply()
+            }
+        }
+
         // Install crash handler first
         CrashHandler.install(this)
         ArtistNameAliases.initialize(this)
@@ -112,7 +125,7 @@ class App :
             // Apply settings, including proxy configuration, before building extraction transport.
             initializeSettings()
 
-            // Warm player config, cipher, and optional PO-token state off the first-play path.
+            // Warm player config and cipher off the first-play path.
             launch(Dispatchers.IO) {
                 delay(2500)
                 var waitedMs = 0

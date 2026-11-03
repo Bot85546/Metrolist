@@ -130,8 +130,10 @@ import com.metrolist.music.utils.rememberPreference
 import com.metrolist.music.utils.reportException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -429,7 +431,7 @@ fun GridItem(
     thumbnailRatio: Float = 1f,
     fillMaxWidth: Boolean = false,
 ) {
-    val gridHeight = currentGridThumbnailHeight()
+    val gridHeight = if (fillMaxWidth) 0.dp else currentGridThumbnailHeight()
     Column(
         modifier = if (fillMaxWidth) {
             modifier
@@ -502,6 +504,15 @@ fun GridItem(
 )
 
 @Composable
+private fun SongDownloadBadge(songId: String) {
+    val downloadUtil = LocalDownloadUtil.current
+    val downloadState by remember(downloadUtil, songId) {
+        downloadUtil.downloads.map { it[songId]?.state }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = null)
+    Icon.Download(downloadState)
+}
+
+@Composable
 fun SongListItem(
     song: Song,
     modifier: Modifier = Modifier,
@@ -521,9 +532,7 @@ fun SongListItem(
             Icon.Library()
         }
         if (showDownloadIcon) {
-            val download by LocalDownloadUtil.current.getDownload(song.id)
-                .collectAsStateWithLifecycle(initialValue = null)
-            Icon.Download(download?.state)
+            SongDownloadBadge(song.id)
         }
     },
     isSelected: Boolean = false,
@@ -611,8 +620,7 @@ fun SongGridItem(
             Icon.Library()
         }
         if (showDownloadIcon) {
-            val download by LocalDownloadUtil.current.getDownload(song.id).collectAsStateWithLifecycle(initialValue = null)
-            Icon.Download(download?.state)
+            SongDownloadBadge(song.id)
         }
     },
     isActive: Boolean = false,
@@ -673,7 +681,7 @@ fun ArtistListItem(
             Icon(
                 painter = painterResource(R.drawable.favorite),
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.error,
+                tint = FavoriteTint,
                 modifier = Modifier
                     .size(18.dp)
                     .padding(end = 2.dp),
@@ -1122,8 +1130,7 @@ fun YouTubeListItem(
         //     Icon.Library()
         // }
         if (item is SongItem) {
-            val download by LocalDownloadUtil.current.getDownload(item.id).collectAsStateWithLifecycle(null)
-            Icon.Download(download?.state)
+            SongDownloadBadge(item.id)
         }
     },
 ) {
@@ -1227,8 +1234,7 @@ fun YouTubeGridItem(
         if (item.explicit) Icon.Explicit()
         // if (item is SongItem && song?.song?.inLibrary != null) Icon.Library()
         if (item is SongItem) {
-            val download by LocalDownloadUtil.current.getDownload(item.id).collectAsStateWithLifecycle(null)
-            Icon.Download(download?.state)
+            SongDownloadBadge(item.id)
         }
     },
     thumbnailRatio: Float = if (item is SongItem) 16f / 9 else 1f,
@@ -1566,24 +1572,13 @@ fun LocalThumbnail(
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.4f), shape)
             ) {
-                if (isPlaying) {
-                    PlayingIndicator(
-                        color = Color.White,
-                        modifier = Modifier.height(24.dp)
-                    )
-                } else {
-                    Icon(
-                        painter = painterResource(R.drawable.play),
-                        contentDescription = null,
-                        tint = Color.White
-                    )
-                }
+                PlaybackStateIndicator(color = Color.White, isPlaying = isPlaying)
             }
         }
 
         if (showCenterPlay) {
             AnimatedVisibility(
-                visible = !(isActive && isPlaying),
+                visible = !isActive,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier
@@ -1608,7 +1603,7 @@ fun LocalThumbnail(
 
         if (playButtonVisible) {
             AnimatedVisibility(
-                visible = true,
+                visible = !isActive,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier
@@ -1897,13 +1892,15 @@ data class Quadruple<A, B, C, D>(
     val fourth: D
 )
 
+private val FavoriteTint = Color(0xFFFF5C8A)
+
 object Icon {
     @Composable
     fun Favorite() {
         Icon(
             painter = painterResource(R.drawable.favorite),
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.error,
+            tint = FavoriteTint,
             modifier = Modifier
                 .size(18.dp)
                 .padding(end = 2.dp)

@@ -25,6 +25,10 @@ import com.metrolist.innertubex.extraction.generateClientPlaybackNonce
 import com.metrolist.innertubex.extraction.strategy.PoTokenProviderKind
 import com.metrolist.music.constants.AudioQuality
 import com.metrolist.music.utils.potoken.PoTokenGenerator
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -51,7 +55,13 @@ object InnerTubeXPlayer {
         if (applicationContext == null) applicationContext = context.applicationContext
     }
 
-    suspend fun prewarm() = bundle().extractor.prewarm()
+    private object ConfigPrewarm : AbstractCoroutineContextElement(Key) {
+        object Key : CoroutineContext.Key<ConfigPrewarm>
+    }
+
+    suspend fun prewarm() = withContext(ConfigPrewarm) {
+        bundle().extractor.prewarm()
+    }
 
     suspend fun playerResponseForPlayback(
         videoId: String,
@@ -74,15 +84,18 @@ object InnerTubeXPlayer {
                     allowBoundedRange = allowBoundedRange,
                 )
             val excludedClients = failedStreamClients(videoId)
+            val resolvedQuality = audioQuality.toInnerTubeX(connectivityManager)
             val stream =
                 requireNotNull(
-                    bundle().extractor.extract(
-                        videoId = videoId,
-                        hints = hints,
-                        excludedClients = excludedClients,
-                        audioQuality = audioQuality.toInnerTubeX(connectivityManager),
-                        clientPlaybackNonce = generateClientPlaybackNonce(),
-                    ),
+                    resolveWithClientFallback(excludedClients) { clients, useLowQuality ->
+                        bundle().extractor.extract(
+                            videoId = videoId,
+                            hints = hints,
+                            excludedClients = clients,
+                            audioQuality = if (useLowQuality) InnerTubeXAudioQuality.LOW else resolvedQuality,
+                            clientPlaybackNonce = generateClientPlaybackNonce(),
+                        )
+                    },
                 ) { "InnerTubeX returned no playable stream" }
             check(stream.sabrBootstrap == null) { "SABR is not supported by this playback engine" }
             Result.success(stream.toPlaybackData())
@@ -113,6 +126,25 @@ object InnerTubeXPlayer {
 
     fun clearStreamClientFailures() {
         streamClientFailures.clear()
+    }
+
+    internal suspend fun <T : Any> resolveWithClientFallback(
+        excludedClients: Set<String>,
+        extract: suspend (Set<String>, Boolean) -> T?,
+    ): T? {
+        if (excludedClients.isEmpty()) return extract(emptySet(), false)
+
+        val alternative =
+            try {
+                extract(excludedClients, false)
+            } catch (error: StreamResolveException) {
+                if (error.reason != StreamResolveException.Reason.NO_PLAYABLE_STREAM) throw error
+                null
+            }
+        if (alternative != null) return alternative
+
+        Timber.tag(TAG).w("Alternate stream clients exhausted; retrying all clients at low quality")
+        return extract(emptySet(), true)
     }
 
     suspend fun refreshAfterStreamRejection(): Boolean = bundle().cipherService.refreshAfterStreamRejection()
@@ -190,14 +222,17 @@ object InnerTubeXPlayer {
                 videoId: String,
                 visitorData: String,
                 cookie: String?,
-            ): PoTokenResult? =
-                poTokenGenerator.getWebClientPoToken(videoId, visitorData)?.let { token ->
+            ): PoTokenResult? {
+                // Token warm-up initializes WebView on the UI thread while the user is browsing.
+                if (currentCoroutineContext()[ConfigPrewarm.Key] != null) return null
+                return poTokenGenerator.getWebClientPoToken(videoId, visitorData)?.let { token ->
                     PoTokenResult(
                         playerRequestToken = token.playerRequestPoToken,
                         streamingDataToken = token.streamingDataPoToken,
                         visitorData = visitorData,
                     )
                 }
+            }
 
             override suspend fun close() {
                 poTokenGenerator.close()

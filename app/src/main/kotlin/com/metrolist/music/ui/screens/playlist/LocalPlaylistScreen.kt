@@ -130,6 +130,7 @@ import com.metrolist.music.ui.component.ExpandableText
 import com.metrolist.music.ui.component.IconButton
 import com.metrolist.music.ui.component.LocalMenuState
 import com.metrolist.music.ui.component.OverlayEditButton
+import com.metrolist.music.ui.component.PlaylistBackdrop
 import com.metrolist.music.ui.component.SongListItem
 import com.metrolist.music.ui.component.SortHeader
 import com.metrolist.music.ui.component.TextFieldDialog
@@ -188,6 +189,7 @@ fun LocalPlaylistScreen(
             true,
         )
     var locked by rememberPreference(PlaylistEditLockKey, defaultValue = true)
+    val swipeRemoveEnabled by rememberPreference(SwipeToRemoveSongKey, defaultValue = false)
 
     val coroutineScope = rememberCoroutineScope()
     val syncUtils = LocalSyncUtils.current
@@ -474,6 +476,7 @@ fun LocalPlaylistScreen(
     Box(
         modifier = Modifier.fillMaxSize(),
     ) {
+        PlaylistBackdrop()
         LazyColumn(
             state = lazyListState,
             contentPadding = LocalPlayerAwareWindowInsets.current.union(WindowInsets.ime).asPaddingValues(),
@@ -549,6 +552,7 @@ fun LocalPlaylistScreen(
             itemsIndexed(
                 items = displayedSongs,
                 key = { _, song -> song.map.id },
+                contentType = { _, _ -> "song" },
             ) { index, song ->
                 ReorderableItem(
                     state = reorderableState,
@@ -576,27 +580,6 @@ fun LocalPlaylistScreen(
                             ) {
                                 setVideoId
                             }
-                        }
-                    }
-
-                    val swipeRemoveEnabled by rememberPreference(SwipeToRemoveSongKey, defaultValue = false)
-                    val dismissBoxState =
-                        rememberSwipeToDismissBoxState(
-                            positionalThreshold = { totalDistance -> totalDistance },
-                        )
-                    var processedDismiss by remember { mutableStateOf(false) }
-                    LaunchedEffect(dismissBoxState.currentValue) {
-                        val dv = dismissBoxState.currentValue
-                        if (swipeRemoveEnabled && !processedDismiss && (
-                                dv == SwipeToDismissBoxValue.StartToEnd ||
-                                    dv == SwipeToDismissBoxValue.EndToStart
-                            )
-                        ) {
-                            processedDismiss = true
-                            deleteFromPlaylist()
-                        }
-                        if (dv == SwipeToDismissBoxValue.Settled) {
-                            processedDismiss = false
                         }
                     }
 
@@ -706,6 +689,25 @@ fun LocalPlaylistScreen(
                             content()
                         }
                     } else {
+                        val dismissBoxState =
+                            rememberSwipeToDismissBoxState(
+                                positionalThreshold = { totalDistance -> totalDistance },
+                            )
+                        var processedDismiss by remember { mutableStateOf(false) }
+                        LaunchedEffect(dismissBoxState.currentValue) {
+                            val dv = dismissBoxState.currentValue
+                            if (!processedDismiss && (
+                                    dv == SwipeToDismissBoxValue.StartToEnd ||
+                                        dv == SwipeToDismissBoxValue.EndToStart
+                                )
+                            ) {
+                                processedDismiss = true
+                                deleteFromPlaylist()
+                            }
+                            if (dv == SwipeToDismissBoxValue.Settled) {
+                                processedDismiss = false
+                            }
+                        }
                         SwipeToDismissBox(
                             state = dismissBoxState,
                             backgroundContent = {},

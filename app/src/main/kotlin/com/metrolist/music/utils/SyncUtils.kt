@@ -90,6 +90,18 @@ internal fun idsRemovedRemotely(
 ): Set<String> =
     if (previousRemoteIds == null) emptySet() else localIds.filterTo(mutableSetOf()) { it in previousRemoteIds && it !in remoteIds }
 
+private val SYSTEM_YOUTUBE_PLAYLIST_IDS = setOf("LM", "SE")
+
+internal fun isYouTubeSystemPlaylist(browseId: String?): Boolean =
+    browseId != null && browseId.removePrefix("VL") in SYSTEM_YOUTUBE_PLAYLIST_IDS
+
+internal fun shouldUnbookmarkMissingPlaylist(
+    playlist: PlaylistEntity,
+    remoteIds: Set<String>,
+): Boolean =
+    playlist.bookmarkedAt != null &&
+        playlist.browseId?.let { it !in remoteIds } == true
+
 internal fun localSongIndexesAbsentFromRemote(
     localSongIds: List<String>,
     remoteSongIds: List<String>,
@@ -1455,8 +1467,9 @@ class SyncUtils @Inject constructor(
         }.onSuccess { result ->
             result.onSuccess { page ->
                 try {
-                    val remotePlaylists = page.items.filterIsInstance<PlaylistItem>()
-                        .filterNot { it.id == "LM" || it.id == "SE" }
+                    val fetchedPlaylists = page.items.filterIsInstance<PlaylistItem>()
+                    val remotePlaylists = fetchedPlaylists
+                        .filterNot { isYouTubeSystemPlaylist(it.id) }
                         .reversed()
                         .distinctBy { it.id }
                     val remoteIds = remotePlaylists.map { it.id }.toSet()
@@ -1464,16 +1477,19 @@ class SyncUtils @Inject constructor(
                     executeCleanupDuplicatePlaylists()
 
                     val localPlaylists = database.playlistEntitiesByNameAsc().toMutableList()
-                    localPlaylists.filterNot { it.browseId in remoteIds }
-                        .filterNot { it.browseId == null }
-                        .forEach { playlist ->
-                            try {
-                                database.update(playlist.localToggleLike())
-                                delay(DB_OPERATION_DELAY_MS)
-                            } catch (e: Exception) {
-                                Timber.e(e, "Failed to update playlist: ${playlist.id}")
+                    if (fetchedPlaylists.isNotEmpty()) {
+                        localPlaylists.filter { shouldUnbookmarkMissingPlaylist(it, remoteIds) }
+                            .forEach { playlist ->
+                                try {
+                                    database.update(playlist.copy(bookmarkedAt = null))
+                                    delay(DB_OPERATION_DELAY_MS)
+                                } catch (e: Exception) {
+                                    Timber.e(e, "Failed to unbookmark playlist: ${playlist.id}")
+                                }
                             }
-                        }
+                    } else {
+                        Timber.w("Saved playlist response contained no playlists; preserving local bookmarks")
+                    }
 
                     for (playlist in remotePlaylists) {
                         try {
@@ -1497,7 +1513,10 @@ class SyncUtils @Inject constructor(
                                 localPlaylists.add(playlistEntity)
                                 Timber.d("syncSavedPlaylists: Created new playlist ${playlist.title} (${playlist.id})")
                             } else {
-                                database.update(playlistEntity, playlist)
+                                database.update(
+                                    playlistEntity.copy(bookmarkedAt = playlistEntity.bookmarkedAt ?: LocalDateTime.now()),
+                                    playlist,
+                                )
                                 Timber.d("syncSavedPlaylists: Updated existing playlist ${playlist.title} (${playlist.id})")
                             }
 

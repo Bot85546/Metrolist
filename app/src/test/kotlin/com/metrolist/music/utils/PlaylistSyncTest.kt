@@ -3,9 +3,11 @@ package com.metrolist.music.utils
 import com.metrolist.innertube.models.PlaylistItem
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.pages.PlaylistPage
+import com.metrolist.music.db.entities.PlaylistEntity
 import com.metrolist.music.db.entities.PlaylistSongMap
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.time.LocalDateTime
 
 class PlaylistSyncTest {
     @Test
@@ -22,6 +24,31 @@ class PlaylistSyncTest {
             idsRemovedRemotely(local, previousRemoteIds = setOf("removedOnYouTube", "stillRemote"), remoteIds = setOf("stillRemote")),
         )
         assertEquals(emptySet<String>(), idsRemovedRemotely(local, previousRemoteIds = null, remoteIds = setOf("stillRemote")))
+    }
+
+    @Test
+    fun `special YouTube playlists do not appear as saved user playlists`() {
+        for (id in listOf("LM", "SE", "VLLM", "VLSE")) {
+            assertEquals(true, isYouTubeSystemPlaylist(id))
+        }
+        for (id in listOf(null, "PL123", "VLPL123", "LM123")) {
+            assertEquals(false, isYouTubeSystemPlaylist(id))
+        }
+    }
+
+    @Test
+    fun `missing saved playlists are unbookmarked only once`() {
+        val saved = PlaylistEntity(
+            id = "saved",
+            name = "Saved",
+            browseId = "PLsaved",
+            bookmarkedAt = LocalDateTime.of(2026, 10, 31, 12, 0),
+        )
+        val missing = emptySet<String>()
+        assertEquals(true, shouldUnbookmarkMissingPlaylist(saved, missing))
+        assertEquals(false, shouldUnbookmarkMissingPlaylist(saved.copy(bookmarkedAt = null), missing))
+        assertEquals(false, shouldUnbookmarkMissingPlaylist(saved, setOf("PLsaved")))
+        assertEquals(false, shouldUnbookmarkMissingPlaylist(saved.copy(browseId = null), missing))
     }
 
     @Test

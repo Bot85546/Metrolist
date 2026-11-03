@@ -1353,7 +1353,7 @@ class MusicService :
                 CommandButton
                     .Builder()
                     .setDisplayName(getString(if (player.shuffleModeEnabled) R.string.action_shuffle_off else R.string.action_shuffle_on))
-                    .setIconResId(if (player.shuffleModeEnabled) R.drawable.shuffle_on else R.drawable.shuffle)
+                    .setIconResId(if (player.shuffleModeEnabled) R.drawable.shuffle else R.drawable.shuffle_off)
                     .setSessionCommand(CommandToggleShuffle)
                     .build(),
                 CommandButton

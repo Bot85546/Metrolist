@@ -85,6 +85,7 @@ import com.metrolist.music.ui.component.PlaylistListItem
 import com.metrolist.music.ui.component.SortHeader
 import com.metrolist.music.extensions.matchesNormalizedQuery
 import com.metrolist.music.extensions.normalizeForSearch
+import com.metrolist.music.utils.isYouTubeSystemPlaylist
 import com.metrolist.music.utils.rememberEnumPreference
 import com.metrolist.music.utils.rememberPreference
 import com.metrolist.music.viewmodels.LibraryPlaylistsViewModel
@@ -283,6 +284,7 @@ fun LibraryPlaylistsScreen(
             }
 
             filteredPlaylists
+                .filterNot { isYouTubeSystemPlaylist(it.playlist.browseId) }
                 .distinctBy { it.id }
                 .forEach { playlist ->
                     add(

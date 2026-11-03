@@ -126,8 +126,8 @@ private fun calculateThumbnailDimensions(
     val effectiveSize = if (isLandscape) {
         minOf(containerWidth, containerHeight) - (horizontalPadding * 2)
     } else {
-        containerWidth - (horizontalPadding * 2)
-    }
+        minOf(containerWidth - (horizontalPadding * 2), containerHeight)
+    }.coerceAtLeast(0.dp)
     return ThumbnailDimensions(
         itemWidth = containerWidth,
         containerSize = containerWidth,

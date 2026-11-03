@@ -383,8 +383,8 @@ class ListenTogetherManager
          * Initialize event collection. Should be called once at app start.
          */
         fun initialize() {
+            if (eventCollectorJob?.isActive == true) return
             Timber.tag(TAG).d("Initializing ListenTogetherManager")
-            eventCollectorJob?.cancel()
             eventCollectorJob =
                 scope.launch {
                     client.events.collect { event ->

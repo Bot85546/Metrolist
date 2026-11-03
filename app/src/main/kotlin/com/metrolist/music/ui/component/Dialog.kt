@@ -5,6 +5,11 @@
 
 package com.metrolist.music.ui.component
 
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeInput
+import dev.chrisbanes.haze.glass.GlassStyle
+import dev.chrisbanes.haze.glass.hazeGlass
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -21,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -70,17 +76,30 @@ fun DefaultDialog(
     title: (@Composable () -> Unit)? = null,
     buttons: (@Composable RowScope.() -> Unit)? = null,
     horizontalAlignment: Alignment.Horizontal = Alignment.CenterHorizontally,
+    glass: Boolean = false,
+    glassHazeState: HazeState? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+        properties = DialogProperties(usePlatformDefaultWidth = glass),
     ) {
+        val glassModifier = if (glassHazeState != null && android.os.Build.VERSION.SDK_INT >= 31) {
+            Modifier.hazeGlass(
+                input = HazeInput.Sources(glassHazeState),
+                style = GlassStyle {
+                    shape(RoundedCornerShape(28.dp))
+                    chromaticAberrationStrength(0.14f)
+                },
+            )
+        } else {
+            Modifier
+        }
         Surface(
-            modifier = Modifier.padding(24.dp),
+            modifier = if (glass) Modifier.padding(horizontal = 24.dp).widthIn(max = 420.dp).clip(AlertDialogDefaults.shape).then(glassModifier).border(1.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.16f), AlertDialogDefaults.shape) else Modifier.padding(24.dp),
             shape = AlertDialogDefaults.shape,
-            color = AlertDialogDefaults.containerColor,
-            tonalElevation = AlertDialogDefaults.TonalElevation,
+            color = if (glass) androidx.compose.ui.graphics.Color(if (glassHazeState != null && android.os.Build.VERSION.SDK_INT >= 31) 0xC0202229 else 0xFF292B32) else AlertDialogDefaults.containerColor,
+            tonalElevation = if (glass) 0.dp else AlertDialogDefaults.TonalElevation,
         ) {
             Column(
                 horizontalAlignment = horizontalAlignment,
@@ -190,10 +209,14 @@ fun ActionPromptDialog(
     onConfirm: () -> Unit,
     onReset: (() -> Unit)? = null,
     onCancel: (() -> Unit)? = null,
+    glass: Boolean = false,
+    glassHazeState: HazeState? = null,
     content: @Composable ColumnScope.() -> Unit = {},
 ) {
     DefaultDialog(
         onDismiss = onDismiss,
+        glass = glass,
+        glassHazeState = glassHazeState,
         title =
             if (titleBar != null) {
                 { Row { titleBar() } }

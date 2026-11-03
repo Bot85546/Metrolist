@@ -28,6 +28,28 @@ class InnerTubeXPlayerTest {
     }
 
     @Test
+    fun `exhausted clients retry at low quality`() = runBlocking {
+        val attempts = mutableListOf<Pair<Set<String>, Boolean>>()
+        val result = InnerTubeXPlayer.resolveWithClientFallback(setOf("WEB_REMIX")) { clients, lowQuality ->
+            attempts += clients to lowQuality
+            if (lowQuality) "stream" else null
+        }
+        assertEquals("stream", result)
+        assertEquals(listOf(setOf("WEB_REMIX") to false, emptySet<String>() to true), attempts)
+    }
+
+    @Test
+    fun `normal playback is not downgraded or retried`() = runBlocking {
+        val attempts = mutableListOf<Pair<Set<String>, Boolean>>()
+        val result = InnerTubeXPlayer.resolveWithClientFallback(emptySet()) { clients, lowQuality ->
+            attempts += clients to lowQuality
+            "stream"
+        }
+        assertEquals("stream", result)
+        assertEquals(listOf(emptySet<String>() to false), attempts)
+    }
+
+    @Test
     fun `failed watch page falls back to anonymous embedded config`() =
         runBlocking {
             val expected = PlayerConfig("embedded", 123, null, null)

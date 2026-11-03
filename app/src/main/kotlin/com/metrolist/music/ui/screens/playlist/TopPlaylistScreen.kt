@@ -90,6 +90,7 @@ import com.metrolist.music.ui.component.IconButton
 import com.metrolist.music.ui.component.LibraryCategory
 import com.metrolist.music.ui.component.LibraryCategoryThumbnail
 import com.metrolist.music.ui.component.LocalMenuState
+import com.metrolist.music.ui.component.PlaylistBackdrop
 import com.metrolist.music.ui.component.SongListItem
 import com.metrolist.music.ui.component.SortHeader
 import com.metrolist.music.ui.menu.SelectionSongMenu
@@ -246,58 +247,59 @@ fun TopPlaylistScreen(
     Box(
         modifier = Modifier.fillMaxSize(),
     ) {
+        PlaylistBackdrop()
         LazyColumn(
             state = state,
             contentPadding = LocalPlayerAwareWindowInsets.current.asPaddingValues(),
         ) {
             if (songs != null) {
+                item(key = "playlist_header") {
+                    if (songs!!.isNotEmpty() && !isSearching) {
+                        TopPlaylistHeader(
+                            name = name,
+                            songs = songs!!,
+                            likeLength = likeLength,
+                            downloadState = downloadState,
+                            onShowRemoveDownloadDialog = { showRemoveDownloadDialog = true },
+                            menuState = menuState,
+                            modifier = Modifier.animateItem()
+                        )
+                    }
+                }
+
+                item(key = "songs_header") {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(start = 16.dp),
+                    ) {
+                        SortHeader(
+                            sortType = sortType,
+                            sortDescending = false,
+                            onSortTypeChange = {
+                                viewModel.setTopPeriod(it)
+                            },
+                            onSortDescendingChange = {},
+                            sortTypeText = { sortType ->
+                                when (sortType) {
+                                    MyTopFilter.ALL_TIME -> R.string.all_time
+                                    MyTopFilter.DAY -> R.string.past_24_hours
+                                    MyTopFilter.WEEK -> R.string.past_week
+                                    MyTopFilter.MONTH -> R.string.past_month
+                                    MyTopFilter.YEAR -> R.string.past_year
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            showDescending = false,
+                        )
+                    }
+                }
+
                 if (songs!!.isEmpty()) {
                     item(key = "empty_placeholder") {
                         EmptyPlaceholder(
                             icon = R.drawable.music_note,
                             text = stringResource(R.string.playlist_is_empty),
                         )
-                    }
-                } else {
-                    if (!isSearching) {
-                        item(key = "playlist_header") {
-                            TopPlaylistHeader(
-                                name = name,
-                                songs = songs!!,
-                                likeLength = likeLength,
-                                downloadState = downloadState,
-                                onShowRemoveDownloadDialog = { showRemoveDownloadDialog = true },
-                                menuState = menuState,
-                                modifier = Modifier.animateItem()
-                            )
-                        }
-                    }
-
-                    item(key = "songs_header") {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(start = 16.dp),
-                        ) {
-                            SortHeader(
-                                sortType = sortType,
-                                sortDescending = false,
-                                onSortTypeChange = {
-                                    viewModel.topPeriod.value = it
-                                },
-                                onSortDescendingChange = {},
-                                sortTypeText = { sortType ->
-                                    when (sortType) {
-                                        MyTopFilter.ALL_TIME -> R.string.all_time
-                                        MyTopFilter.DAY -> R.string.past_24_hours
-                                        MyTopFilter.WEEK -> R.string.past_week
-                                        MyTopFilter.MONTH -> R.string.past_month
-                                        MyTopFilter.YEAR -> R.string.past_year
-                                    }
-                                },
-                                modifier = Modifier.weight(1f),
-                                showDescending = false,
-                            )
-                        }
                     }
                 }
 

@@ -26,6 +26,7 @@ private val PAXSENIX_AGENT_LINE_REGEX = "\\[(\\d{1,2}):(\\d{2})\\.(\\d{2,3})\\](
 private val PAXSENIX_BG_LINE_REGEX = "^\\[bg:\\s*(.*)\\]$".toRegex()
 
 // Regex for agent and background markers (existing format)
+private val PUNCTUATION_REGEX = "[.,!?;]".toRegex()
 private val AGENT_REGEX = "\\{agent:([^}]+)\\}".toRegex()
 private val BACKGROUND_REGEX = "^\\{bg\\}".toRegex()
 
@@ -1029,7 +1030,7 @@ object LyricsUtils {
             .filter { it.isNotEmpty() }
 
         words.forEachIndexed { _, word ->
-            if (word.matches("[.,!?;]".toRegex()) || word.isBlank()) {
+            if (word.matches(PUNCTUATION_REGEX) || word.isBlank()) {
                 romajiBuilder.append(word)
             } else {
                 var charIndex = 0
@@ -1069,7 +1070,7 @@ object LyricsUtils {
             .filter { it.isNotEmpty() }
 
         words.forEachIndexed { _, word ->
-            if (word.matches("[.,!?;]".toRegex()) || word.isBlank()) {
+            if (word.matches(PUNCTUATION_REGEX) || word.isBlank()) {
                 romajiBuilder.append(word)
             } else {
                 var charIndex = 0
@@ -1110,7 +1111,7 @@ object LyricsUtils {
             .filter { it.isNotEmpty() }
 
         words.forEachIndexed { _, word ->
-            if (word.matches("[.,!?;]".toRegex()) || word.isBlank()) {
+            if (word.matches(PUNCTUATION_REGEX) || word.isBlank()) {
                 romajiBuilder.append(word)
             } else {
                 var charIndex = 0
@@ -1131,7 +1132,7 @@ object LyricsUtils {
             .filter { it.isNotEmpty() }
 
         words.forEachIndexed { _, word ->
-            if (word.matches("[.,!?;]".toRegex()) || word.isBlank()) {
+            if (word.matches(PUNCTUATION_REGEX) || word.isBlank()) {
                 romajiBuilder.append(word)
             } else {
                 var charIndex = 0
@@ -1152,7 +1153,7 @@ object LyricsUtils {
             .filter { it.isNotEmpty() }
 
         words.forEach { word ->
-            if (word.matches("[.,!?;]".toRegex()) || word.isBlank()) {
+            if (word.matches(PUNCTUATION_REGEX) || word.isBlank()) {
                 romajiBuilder.append(word)
             } else {
                 var charIndex = 0
@@ -1180,7 +1181,7 @@ object LyricsUtils {
             .filter { it.isNotEmpty() }
 
         words.forEachIndexed { _, word ->
-            if (word.matches("[.,!?;]".toRegex()) || word.isBlank()) {
+            if (word.matches(PUNCTUATION_REGEX) || word.isBlank()) {
                 romajiBuilder.append(word)
             } else {
                 var charIndex = 0
@@ -1201,7 +1202,7 @@ object LyricsUtils {
             .filter { it.isNotEmpty() }
 
         words.forEachIndexed { _, word ->
-            if (word.matches("[.,!?;]".toRegex()) || word.isBlank()) {
+            if (word.matches(PUNCTUATION_REGEX) || word.isBlank()) {
                 romajiBuilder.append(word)
             } else {
                 var charIndex = 0

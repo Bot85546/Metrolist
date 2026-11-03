@@ -48,7 +48,7 @@ fun TimeTransfer(
                 text = stringResource(R.string.time_transfer_warning),
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = TextAlign.Center,
-                color = androidx.compose.ui.graphics.Color.Red,
+                color = MaterialTheme.colorScheme.error,
             )
 
             Spacer(modifier = Modifier.height(12.dp))
